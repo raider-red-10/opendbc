@@ -64,5 +64,55 @@ class TestLfaAlt(unittest.TestCase):
       f"LFA_ALT (0xCB) emitted on an HDA2 car. Got {[hex(a) for a in addrs]}")
 
 
+class TestPalisadeLx3(unittest.TestCase):
+  """End-to-end chain for the first HDA1 + angle-steering car on this branch:
+  no LKAS on the camera bus => LFA steering; 0xCB present => SEND_LFA;
+  SEND_LFA + CANFD_ANGLE_STEERING => LFA_ALT emitted; CCNC + not LKA => CCNC
+  safety param.
+  """
+
+  def _lx3_params(self):
+    # LX3 camera bus carries LFA_ALT (0xCB) and no LKAS; 0x1cf present on ECAN
+    # so CANFD_ALT_BUTTONS is not set (matching the source port's final state).
+    candidate = CAR.HYUNDAI_PALISADE_HEV_LX3
+    car_fw = [CarParams.CarFw(ecu=ecu, fwVersion=vers[0], address=addr, subAddress=sub or 0)
+              for (ecu, addr, sub), vers in FW_VERSIONS[candidate].items()]
+    fp = gen_empty_fingerprint()
+    fp[2][LFA_ALT_ADDR] = 24
+    fp[0][0x1cf] = 8
+    return CarInterface.get_params(candidate, fp, car_fw, False, True, False)
+
+  def test_resolves_as_hda1_ccnc(self):
+    CP = self._lx3_params()
+    assert CP.flags & HyundaiFlags.CCNC, "LX3 must carry CCNC"
+    assert CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING, "LX3 must be angle steering"
+    assert not (CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG), "LX3 must NOT be LKA steering"
+
+  def test_send_lfa_detected_from_0xcb(self):
+    CP = self._lx3_params()
+    assert CP.flags & HyundaiFlags.SEND_LFA, "0xCB on the camera bus must set SEND_LFA"
+
+  def test_ccnc_safety_param_set(self):
+    from opendbc.car.hyundai.values import HyundaiSafetyFlags
+    CP = self._lx3_params()
+    param = int(CP.safetyConfigs[-1].safetyParam)
+    assert param & HyundaiSafetyFlags.CCNC, "CCNC safety param must be set on an HDA1 CCNC car"
+    assert param & HyundaiSafetyFlags.CANFD_ANGLE_STEERING
+    assert not (param & HyundaiSafetyFlags.CANFD_LKA_STEER_MSG)
+
+  def test_emits_lfa_alt_not_lkas(self):
+    CP = self._lx3_params()
+    addrs = steering_addrs(CP)
+    assert LFA_ALT_ADDR in addrs, (
+      f"LX3 must steer via LFA_ALT (0xCB); got {[hex(a) for a in addrs]}")
+    assert LKAS_ADDR not in addrs and LKAS_ALT_ADDR not in addrs, (
+      f"LX3 must not emit LKAS; got {[hex(a) for a in addrs]}")
+
+  def test_steer_control_type_is_angle(self):
+    from opendbc.car import structs
+    CP = self._lx3_params()
+    assert CP.steerControlType == structs.CarParams.SteerControlType.angle
+
+
 if __name__ == "__main__":
   unittest.main()

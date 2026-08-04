@@ -1861,6 +1861,16 @@
     ],
     "package": "All"
   },
+  "Hyundai Palisade Hybrid (without HDA II, LFA2) 2026": {
+    "platform": "HYUNDAI_PALISADE_HEV_LX3",
+    "make": "Hyundai",
+    "brand": "hyundai",
+    "model": "Palisade Hybrid (without HDA II, LFA2)",
+    "year": [
+      "2026"
+    ],
+    "package": "Lane Follow Assist 2"
+  },
   "Hyundai Santa Cruz 2022-24": {
     "platform": "HYUNDAI_SANTA_CRUZ_1ST_GEN",
     "make": "Hyundai",
