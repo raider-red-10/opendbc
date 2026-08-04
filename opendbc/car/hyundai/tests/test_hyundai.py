@@ -12,7 +12,7 @@ from opendbc.car.hyundai.values import CAMERA_SCC_CAR, CANFD_CAR, CAN_GEARS, CAR
                                          HYBRID_CAR, EV_CAR, FW_QUERY_CONFIG, LEGACY_SAFETY_MODE_CAR, CANFD_FUZZY_WHITELIST, \
                                          UNSUPPORTED_LONGITUDINAL_CAR, PLATFORM_CODE_ECUS, HYUNDAI_VERSION_REQUEST_LONG, \
                                          HyundaiFlags, get_platform_codes, HyundaiSafetyFlags, \
-                                         NON_SCC_CAR
+                                         NON_SCC_CAR, ActvACISta, ESA_ActvSta
 from opendbc.car.hyundai.fingerprints import FW_VERSIONS
 
 Ecu = CarParams.Ecu
@@ -256,3 +256,24 @@ class TestHyundaiFingerprint(unittest.TestCase):
         platforms_with_shared_codes.add(platform)
 
     assert platforms_with_shared_codes == excluded_platforms
+
+  def test_ccnc_flags_defined(self):
+    # CCNC gates the HDA1 angle-steering (LFA_ALT) and cluster-message paths.
+    # Both bits must exist and must not collide with any existing flag.
+    assert HyundaiFlags.CCNC.value == 2 ** 28
+    assert HyundaiSafetyFlags.CCNC.value == 2048
+
+    for flagcls in (HyundaiFlags, HyundaiSafetyFlags):
+      others = [f for f in flagcls if f.name != "CCNC"]
+      collisions = [f.name for f in others if f.value == flagcls.CCNC.value]
+      assert not collisions, f"{flagcls.__name__}.CCNC bit collides with {collisions}"
+
+  def test_lfa_alt_state_enums(self):
+    # These values are packed directly into LFA_ALT CAN frames, so they must
+    # match the source port exactly -- a wrong value is a wrong steering command.
+    assert ActvACISta.INIT.value == 0
+    assert ActvACISta.INACTIVE.value == 1
+    assert ActvACISta.ACTIVE35_ACTIVE.value == 2
+
+    assert ESA_ActvSta.INACTIVE.value == 0
+    assert ESA_ActvSta.ACTIVE.value == 1

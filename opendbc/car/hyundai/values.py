@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass, field
-from enum import IntFlag
+from enum import IntFlag, Enum
 
 from opendbc.car import Bus, CarSpecs, DbcDict, PlatformConfig, Platforms, uds
 from opendbc.car.lateral import AngleSteeringLimitsVM
@@ -89,6 +89,7 @@ class HyundaiSafetyFlags(IntFlag):
   FCEV_GAS = 256
   ALT_LIMITS_2 = 512
   CANFD_ANGLE_STEERING = 1024
+  CCNC = 2048
 
 
 # Hyundai/Kia/Genesis SCC (Smart Cruise Control) and steering architecture:
@@ -171,6 +172,11 @@ class HyundaiFlags(IntFlag):
   ALT_LIMITS_2 = 2 ** 26
 
   CANFD_ANGLE_STEERING = 2 ** 27
+
+  # Connected Car Navigation Cockpit. Gates the HDA1 angle-steering path (LFA_ALT)
+  # and the cluster messages openpilot must send in place of an ADAS ECU.
+  # Orthogonal to HDA1/HDA2 -- HDA2 platforms carry this flag too.
+  CCNC = 2 ** 28
 
 
 @dataclass
@@ -984,3 +990,16 @@ UNSUPPORTED_LONGITUDINAL_CAR = {
 NON_SCC_CAR = CAR.with_sp_flags(HyundaiFlagsSP.NON_SCC)
 
 DBC = CAR.create_dbc_map()
+
+
+# LFA_ALT (0xCB) state values for HDA1 angle-steering cars. These are packed
+# directly into the CAN frame, so the values must match the vehicle's expectations.
+class ActvACISta(Enum):
+  INIT = 0
+  INACTIVE = 1
+  ACTIVE35_ACTIVE = 2
+
+
+class ESA_ActvSta(Enum):
+  INACTIVE = 0
+  ACTIVE = 1
