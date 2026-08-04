@@ -64,6 +64,8 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     self.buttons_counter = 0
 
     self.cruise_info = {}
+    # CCNC cluster messages, captured from the camera and retransmitted on HDA1 CCNC cars
+    self.msg_161, self.msg_162, self.msg_1b5 = {}, {}, {}
 
     # On some cars, CLU15->CF_Clu_VehicleSpeed can oscillate faster than the dash updates. Sample at 5 Hz
     self.cluster_speed = 0
@@ -265,6 +267,13 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
       self.imu_lateral_acceleration = cp.vl["IMU_01_10ms"]["IMU_LatAccelVal"] * 9.81  # m/s^2
     else:
       ret.steeringPressed = self.update_steering_pressed(abs(ret.steeringTorque) > self.params.STEER_THRESHOLD, 5)
+
+    # Capture the CCNC cluster messages so the car controller can retransmit them.
+    # HDA1 only: on LKA steering cars the ADAS ECU produces these, so openpilot must not.
+    if self.CP.flags & HyundaiFlags.CCNC and not self.CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG:
+      self.msg_161, self.msg_162, self.msg_1b5 = map(copy.copy, (cp_cam.vl["CCNC_0x161"],
+                                                                 cp_cam.vl["CCNC_0x162"],
+                                                                 cp_cam.vl["FR_CMR_03_50ms"]))
 
     # TODO: alt signal usage may be described by cp.vl['BLINKERS']['USE_ALT_LAMP']
     left_blinker_sig, right_blinker_sig = "LEFT_LAMP", "RIGHT_LAMP"
