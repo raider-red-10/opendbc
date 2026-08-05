@@ -287,8 +287,19 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     left_blinker_sig, right_blinker_sig = "LEFT_LAMP", "RIGHT_LAMP"
     if self.CP.carFingerprint == CAR.HYUNDAI_KONA_EV_2ND_GEN or self.is_canfd_angle_steering:
       left_blinker_sig, right_blinker_sig = "LEFT_LAMP_ALT", "RIGHT_LAMP_ALT"
-    # LX3 does not transmit BLINKERS (0x413) -- see DOORS_SEATBELTS note above
-    if self.CP.carFingerprint != CAR.HYUNDAI_PALISADE_HEV_LX3:
+    # LX3 does not transmit BLINKERS (0x413). The lamps are in BLINKERS_ALT (0x3e3) byte 11:
+    # bit 2 left, bit 4 right -- the same two-bits-apart layout BLINKERS uses. Measured on a
+    # 2026 Palisade Hybrid: each bit flashes at 1.32Hz for its own stalk and stays static for
+    # the other.
+    #
+    # The hold is longer than the usual 50 because 0x3e3 arrives at 5Hz, not 50Hz. Sampling a
+    # 379ms lamp pulse every 196ms leaves up to 588ms (59 frames) between two frames that
+    # catch the lamp lit, so a 50 frame hold would drop the blinker between flashes and
+    # cancel a lane change mid-manoeuvre.
+    if self.CP.carFingerprint == CAR.HYUNDAI_PALISADE_HEV_LX3:
+      ret.leftBlinker, ret.rightBlinker = self.update_blinker_from_lamp(100, cp.vl["BLINKERS_ALT"]["LEFT_LAMP"],
+                                                                        cp.vl["BLINKERS_ALT"]["RIGHT_LAMP"])
+    else:
       ret.leftBlinker, ret.rightBlinker = self.update_blinker_from_lamp(50, cp.vl["BLINKERS"][left_blinker_sig],
                                                                         cp.vl["BLINKERS"][right_blinker_sig])
     if self.CP.enableBsm:
