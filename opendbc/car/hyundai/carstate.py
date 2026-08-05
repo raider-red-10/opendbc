@@ -64,6 +64,8 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     self.buttons_counter = 0
 
     self.cruise_info = {}
+    # Last CRUISE_BUTTONS_ALT frame, replayed by ICBM to inject a button press
+    self.cruise_btns_alt_info = {}
     # CCNC cluster messages, captured from the camera and retransmitted on HDA1 CCNC cars
     self.msg_161, self.msg_162, self.msg_1b5 = {}, {}, {}
 
@@ -329,6 +331,8 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     else:
       self.lda_button = cp.vl[self.cruise_btns_msg_canfd]["LDA_BTN"]
     self.buttons_counter = cp.vl[self.cruise_btns_msg_canfd]["COUNTER"]
+    if self.CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS:
+      self.cruise_btns_alt_info = copy.copy(cp.vl[self.cruise_btns_msg_canfd])
     ret.accFaulted = cp.vl["TCS"]["ACCEnable"] != 0  # 0 ACC CONTROL ENABLED, 1-3 ACC CONTROL DISABLED
 
     if self.CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG:

@@ -288,13 +288,22 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
   }
 
   // cruise buttons check
-  if (msg->addr == 0x1cfU) {
-    int button = msg->data[2] & 0x7U;
+  if ((msg->addr == 0x1cfU) || (msg->addr == 0x1aaU)) {
+    int button = 0;
+    bool addr_allowed = true;
+    if (msg->addr == 0x1cfU) {
+      button = msg->data[2] & 0x7U;
+    } else {
+      // CRUISE_BUTTONS_ALT, same bit position we read it from in the rx hook. Only cars that
+      // actually use the alt button message may send it.
+      button = (msg->data[4] >> 4) & 0x7U;
+      addr_allowed = hyundai_canfd_alt_buttons;
+    }
     bool is_cancel = (button == HYUNDAI_BTN_CANCEL);
     bool is_resume = (button == HYUNDAI_BTN_RESUME);
     bool is_set = (button == HYUNDAI_BTN_SET);
 
-    bool allowed = (is_cancel && cruise_engaged_prev) || ((is_resume || is_set) && controls_allowed);
+    bool allowed = addr_allowed && ((is_cancel && cruise_engaged_prev) || ((is_resume || is_set) && controls_allowed));
     if (!allowed) {
       tx = false;
     }
@@ -391,6 +400,7 @@ static safety_config hyundai_canfd_init(uint16_t param) {
 
 #define HYUNDAI_CANFD_LFA_STEERING_CAMERA_SCC_CCNC_TX_MSGS(longitudinal) \
     HYUNDAI_CANFD_CRUISE_BUTTON_TX_MSGS(2) \
+    {0x1AA, 2, 16, .check_relay = false}, /* CRUISE_BUTTONS_ALT -- ICBM on alt-button cars */ \
     HYUNDAI_CANFD_LFA_STEERING_COMMON_TX_MSGS(0) \
     HYUNDAI_CANFD_SCC_CONTROL_COMMON_TX_MSGS(0, (longitudinal)) \
     {0xCB,  0, 24, .check_relay = true}, /* LFA_ALT -- HDA1 angle steering */ \

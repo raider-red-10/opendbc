@@ -225,7 +225,12 @@ class CarInterface(CarInterfaceBase):
       if 0x53E in fingerprint[2]:
         ret.flags |= HyundaiFlagsSP.HAS_LKAS12.value
 
-    ret.intelligentCruiseButtonManagementAvailable = not (stock_cp.flags & HyundaiFlags.CANFD_ALT_BUTTONS)
+    # ICBM works by pressing SET+/SET- for the driver. CANFD_ALT_BUTTONS cars carry the buttons in
+    # CRUISE_BUTTONS_ALT (0x1aa), which is only in the panda TX list for the CCNC camera-SCC config
+    # -- keep this in sync with HYUNDAI_CANFD_LFA_STEERING_CAMERA_SCC_CCNC_TX_MSGS in
+    # opendbc/safety/modes/hyundai_canfd.h, or the panda will reject every button we send.
+    alt_buttons_supported = bool(stock_cp.flags & HyundaiFlags.CCNC and stock_cp.flags & HyundaiFlags.CANFD_CAMERA_SCC)
+    ret.intelligentCruiseButtonManagementAvailable = not (stock_cp.flags & HyundaiFlags.CANFD_ALT_BUTTONS) or alt_buttons_supported
 
     return ret
 

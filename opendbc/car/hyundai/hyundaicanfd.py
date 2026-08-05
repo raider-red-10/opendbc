@@ -113,6 +113,26 @@ def create_buttons(packer, CP, CAN, cnt, btn):
   return packer.make_can_msg("CRUISE_BUTTONS", bus, values)
 
 
+def create_buttons_alt(packer, CP, CAN, cruise_btns_copy, cnt, btn):
+  # CANFD_ALT_BUTTONS cars carry the cruise buttons in CRUISE_BUTTONS_ALT (0x1aa) rather than
+  # CRUISE_BUTTONS (0x1cf). 0x1aa is 16 bytes and most of it is unidentified, so instead of
+  # building a frame from scratch we replay the last one the car sent and override only the
+  # button field. CHECKSUM is recomputed by the packer, so the copied value is a placeholder.
+  values = dict(cruise_btns_copy)
+  values.update({
+    "COUNTER": cnt,
+    "CRUISE_BUTTONS": btn,
+    # The captured frame may have been sampled while the driver was holding a button. Replaying
+    # that would repeat their press 20 times -- clear every button we are not deliberately sending.
+    "ADAPTIVE_CRUISE_MAIN_BTN": 0,
+    "NORMAL_CRUISE_MAIN_BTN": 0,
+    "LDA_BTN": 0,
+  })
+
+  bus = CAN.ECAN if CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG else CAN.CAM
+  return packer.make_can_msg("CRUISE_BUTTONS_ALT", bus, values)
+
+
 def create_acc_cancel(packer, CP, CAN, cruise_info_copy):
   # CAN FD camera-based SCC requires additional signals to be preserved
   # verbatim from the previous SCC_CONTROL frame to avoid checksum or

@@ -10,7 +10,7 @@ from opendbc.car.vehicle_model import VehicleModel, calc_slip_factor
 from opendbc.safety.tests.libsafety import libsafety_py
 import opendbc.safety.tests.common as common
 from opendbc.safety.tests.common import CANPackerSafety, away_round, round_speed
-from opendbc.safety.tests.hyundai_common import HyundaiButtonBase, HyundaiLongitudinalBase
+from opendbc.safety.tests.hyundai_common import Buttons, HyundaiButtonBase, HyundaiLongitudinalBase
 from opendbc.car.lateral import get_max_angle_delta_vm, get_max_angle_vm, AngleSteeringLimitsVM
 from opendbc.car.hyundai.interface import CarInterface
 
@@ -649,6 +649,72 @@ class TestHyundaiCanfdLFASteeringLongAltButtons(TestHyundaiCanfdLFASteeringLongB
   def test_acc_cancel(self):
     # Alt buttons does not use SCC_CONTROL to cancel if longitudinal
     pass
+
+
+class TestHyundaiCanfdCcncAltButtonsTx(unittest.TestCase):
+  """CCNC camera-SCC cars are the one configuration allowed to send CRUISE_BUTTONS_ALT (0x1aa),
+  which is what lets ICBM adjust the set speed on alt-button cars. Everywhere else 0x1aa must
+  stay out of the TX list -- see TestHyundaiCanfdLFASteeringAltButtonsBase.test_button_sends."""
+
+  PT_BUS = 0
+  SCC_BUS = 2
+  BUTTONS_TX_BUS = 2
+  CCNC_PARAM = (HyundaiSafetyFlags.CCNC | HyundaiSafetyFlags.CANFD_ALT_BUTTONS |
+                HyundaiSafetyFlags.CAMERA_SCC | HyundaiSafetyFlags.CANFD_ANGLE_STEERING |
+                HyundaiSafetyFlags.HYBRID_GAS)
+
+  def setUp(self):
+    self.packer = CANPackerSafety("hyundai_canfd_generated")
+    self.safety = libsafety_py.libsafety
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfd, self.CCNC_PARAM)
+    self.safety.init_tests()
+
+  def _tx(self, msg):
+    return self.safety.safety_tx_hook(msg)
+
+  def _rx(self, msg):
+    return self.safety.safety_rx_hook(msg)
+
+  def _button_msg(self, buttons):
+    values = {"CRUISE_BUTTONS": buttons}
+    return self.packer.make_can_msg_safety("CRUISE_BUTTONS_ALT", self.BUTTONS_TX_BUS, values)
+
+  def _pcm_status_msg(self, enable):
+    values = {"ACCMode": 1 if enable else 0}
+    return self.packer.make_can_msg_safety("SCC_CONTROL", self.SCC_BUS, values)
+
+  def test_set_and_resume_require_controls_allowed(self):
+    for allowed in (False, True):
+      self.safety.set_controls_allowed(allowed)
+      for btn in (Buttons.RESUME, Buttons.SET):
+        with self.subTest(allowed=allowed, btn=btn):
+          self.assertEqual(allowed, self._tx(self._button_msg(btn)))
+
+  def test_cancel_requires_cruise_engaged(self):
+    self.safety.set_controls_allowed(0)
+    for engaged in (True, False):
+      with self.subTest(engaged=engaged):
+        self._rx(self._pcm_status_msg(engaged))
+        self.assertEqual(engaged, self._tx(self._button_msg(Buttons.CANCEL)))
+
+  def test_no_other_button_value_is_accepted(self):
+    # Only the three buttons ICBM and cancel actually use may go out, whatever the state
+    self.safety.set_controls_allowed(1)
+    self._rx(self._pcm_status_msg(True))
+    for btn in range(8):
+      if btn in (Buttons.RESUME, Buttons.SET, Buttons.CANCEL):
+        continue
+      with self.subTest(btn=btn):
+        self.assertFalse(self._tx(self._button_msg(btn)))
+
+  def test_blocked_without_the_alt_buttons_flag(self):
+    # A CCNC car that uses the standard 0x1cf message must not be able to send 0x1aa
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfd, self.CCNC_PARAM & ~HyundaiSafetyFlags.CANFD_ALT_BUTTONS)
+    self.safety.init_tests()
+    self.safety.set_controls_allowed(1)
+    for btn in (Buttons.RESUME, Buttons.SET):
+      with self.subTest(btn=btn):
+        self.assertFalse(self._tx(self._button_msg(btn)))
 
 
 if __name__ == "__main__":

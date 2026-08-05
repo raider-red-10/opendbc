@@ -47,8 +47,17 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
   def create_canfd_mock_button_messages(self, packer, CS, CAN, send_button) -> list[CanData]:
     can_sends = []
     if self.CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS:
-      # TODO: resume for alt button cars
-      pass
+      # Same spoofed-counter burst as the 0x1cf path below, against CRUISE_BUTTONS_ALT. The
+      # frame is a replay of the car's own last button message, so we cannot send anything
+      # before the first one arrives. COUNTER is 8 bits here, not 4.
+      if CS.cruise_btns_alt_info and (self.frame - self.last_button_frame) * DT_CTRL > 0.2:
+        self.button_frame += 1
+        button_counter_offset = [1, 1, 0, None][self.button_frame % 4]
+        if button_counter_offset is not None:
+          for _ in range(20):
+            can_sends.append(hyundaicanfd.create_buttons_alt(packer, self.CP, CAN, CS.cruise_btns_alt_info,
+                                                             (CS.buttons_counter + button_counter_offset) % 0x100, send_button))
+          self.last_button_frame = self.frame
     else:
       if (self.frame - self.last_button_frame) * DT_CTRL > 0.2:
         self.button_frame += 1
