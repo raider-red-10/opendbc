@@ -345,9 +345,24 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
           # this message is 50Hz but the ECU frequently stops transmitting for ~0.5s
           ("CRUISE_BUTTONS", 1)
         ]
+    pt = CANParser(DBC[CP.carFingerprint][Bus.pt], msgs, CanBus(CP).ECAN)
+    cam = CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).CAM)
+
+    # CCNC cars transmit ACCELERATOR_ALT (0x105) with a counter that increments by 2 per
+    # frame. Measured on a 2026 Palisade Hybrid: 299 of 299 consecutive deltas were 2,
+    # while every other message stepped by 1. The parser's counter check assumes +1, so
+    # the message accumulates counter_fail and drives can_valid false -> canError.
+    # Skip the counter check for this one message; checksum and timeout still apply.
+    # Must stay in sync with the matching gate in safety/modes/hyundai_canfd.h -- if the
+    # two layers disagree, one passes while the other faults.
+    if CP.flags & HyundaiFlags.CCNC:
+      accel_alt = pt.dbc.name_to_msg["ACCELERATOR_ALT"].address
+      _ = pt.vl["ACCELERATOR_ALT"]  # registers the message state
+      pt.message_states[accel_alt].ignore_counter = True
+
     return {
-      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], msgs, CanBus(CP).ECAN),
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).CAM),
+      Bus.pt: pt,
+      Bus.cam: cam,
     }
 
   def get_can_parsers(self, CP, CP_SP):
