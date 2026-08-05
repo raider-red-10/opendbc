@@ -356,17 +356,32 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     pt = CANParser(DBC[CP.carFingerprint][Bus.pt], msgs, CanBus(CP).ECAN)
     cam = CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).CAM)
 
-    # CCNC cars transmit ACCELERATOR_ALT (0x105) with a counter that increments by 2 per
-    # frame. Measured on a 2026 Palisade Hybrid: 299 of 299 consecutive deltas were 2,
-    # while every other message stepped by 1. The parser's counter check assumes +1, so
-    # the message accumulates counter_fail and drives can_valid false -> canError.
-    # Skip the counter check for this one message; checksum and timeout still apply.
-    # Must stay in sync with the matching gate in safety/modes/hyundai_canfd.h -- if the
-    # two layers disagree, one passes while the other faults.
+    # CCNC cars generate message counters at 100Hz but transmit some messages at 50Hz, so
+    # those counters advance by 2 per frame. Measured on a 2026 Palisade Hybrid:
+    #
+    #   ACCELERATOR_ALT 0x105  ~50Hz  deltas [(2, 997)]
+    #   GEAR_SHIFTER    0x130  ~50Hz  deltas [(2, 399)]
+    #   TCS/SCC_CONTROL/CRUISE_BUTTONS_ALT also 50Hz but step by 1
+    #
+    # The parser's counter check assumes +1, so these accumulate counter_fail and drive
+    # can_valid false -> canError. Skip the counter check for them; the checksum and
+    # timeout checks still apply, and the gear value itself is separately checksummed.
+    #
+    # Only the messages this car actually reads are touched -- registering a message the
+    # platform does not transmit would itself make the parser invalid. Keep the 0x105
+    # entry in sync with safety/modes/hyundai_canfd.h; if the layers disagree, one passes
+    # while the other faults.
     if CP.flags & HyundaiFlags.CCNC:
-      accel_alt = pt.dbc.name_to_msg["ACCELERATOR_ALT"].address
-      _ = pt.vl["ACCELERATOR_ALT"]  # registers the message state
-      pt.message_states[accel_alt].ignore_counter = True
+      gear_msg = "ACCELERATOR" if CP.flags & HyundaiFlags.EV else \
+                 "GEAR_ALT" if CP.flags & HyundaiFlags.CANFD_ALT_GEARS else \
+                 "GEAR_ALT_2" if CP.flags & HyundaiFlags.CANFD_ALT_GEARS_2 else \
+                 "GEAR_SHIFTER"
+      accel_msg = "ACCELERATOR" if CP.flags & HyundaiFlags.EV else \
+                  "ACCELERATOR_ALT" if CP.flags & HyundaiFlags.HYBRID else \
+                  "ACCELERATOR_BRAKE_ALT"
+      for name in {gear_msg, accel_msg}:
+        _ = pt.vl[name]  # registers the message state
+        pt.message_states[pt.dbc.name_to_msg[name].address].ignore_counter = True
 
     return {
       Bus.pt: pt,
