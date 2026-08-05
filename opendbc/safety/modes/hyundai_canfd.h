@@ -41,6 +41,23 @@
   HYUNDAI_CANFD_COMMON_RX_CHECKS(pt_bus)                                                                                                         \
   {.msg = {{0x1aa, (pt_bus), 16, 50U, .ignore_checksum = true, .max_counter = 0xffU, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
 
+// CCNC cars transmit ACCELERATOR_ALT (0x105) with a counter that increments by 2 per frame,
+// measured on a 2026 Palisade Hybrid (LX3): 299 of 299 consecutive deltas were 2. The safety
+// layer's counter check hardcodes a +1 step (update_counter() in safety.h), so it can only
+// ever be satisfied by a +1 sequence. max_counter = 0 skips the counter check for this one
+// message; checksum, frequency, and quality checks are all still enforced.
+#define HYUNDAI_CANFD_COMMON_RX_CHECKS_CCNC(pt_bus)                                                        \
+  {.msg = {{0x35, (pt_bus), 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true},                  \
+           {0x100, (pt_bus), 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true},                 \
+           {0x105, (pt_bus), 32, 100U, .max_counter = 0U, .ignore_quality_flag = true}}},                  \
+  {.msg = {{0x175, (pt_bus), 24, 50U, .max_counter = 0xffU, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
+  {.msg = {{0xa0, (pt_bus), 24, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
+  {.msg = {{0xea, (pt_bus), 24, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
+
+#define HYUNDAI_CANFD_ALT_BUTTONS_RX_CHECKS_CCNC(pt_bus)                                                                                         \
+  HYUNDAI_CANFD_COMMON_RX_CHECKS_CCNC(pt_bus)                                                                                                    \
+  {.msg = {{0x1aa, (pt_bus), 16, 50U, .ignore_checksum = true, .max_counter = 0xffU, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
+
 // SCC_CONTROL (from ADAS unit or camera)
 #define HYUNDAI_CANFD_SCC_ADDR_CHECK(scc_bus)                                                                            \
   {.msg = {{0x1a0, (scc_bus), 32, 50U, .max_counter = 0xffU, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
@@ -471,6 +488,11 @@ static safety_config hyundai_canfd_init(uint16_t param) {
         HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
       };
 
+      static RxCheck hyundai_canfd_alt_buttons_ccnc_rx_checks[] = {
+        HYUNDAI_CANFD_ALT_BUTTONS_RX_CHECKS_CCNC(0)
+        HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
+      };
+
       static CanMsg hyundai_canfd_lfa_steering_camera_scc_tx_msgs[] = {
         HYUNDAI_CANFD_LFA_STEERING_CAMERA_SCC_TX_MSGS(false)
       };
@@ -486,7 +508,11 @@ static safety_config hyundai_canfd_init(uint16_t param) {
       }
 
       if (hyundai_canfd_alt_buttons) {
-        SET_RX_CHECKS(hyundai_canfd_alt_buttons_rx_checks, ret);
+        if (get_hyundai_ccnc()) {
+          SET_RX_CHECKS(hyundai_canfd_alt_buttons_ccnc_rx_checks, ret);
+        } else {
+          SET_RX_CHECKS(hyundai_canfd_alt_buttons_rx_checks, ret);
+        }
       } else {
         SET_RX_CHECKS(hyundai_canfd_rx_checks, ret);
       }
