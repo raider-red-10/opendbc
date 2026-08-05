@@ -319,7 +319,15 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     prev_lda_button = self.lda_button
     self.cruise_buttons.extend(cp.vl_all[self.cruise_btns_msg_canfd]["CRUISE_BUTTONS"])
     self.main_buttons.extend(cp.vl_all[self.cruise_btns_msg_canfd]["ADAPTIVE_CRUISE_MAIN_BTN"])
-    self.lda_button = cp.vl[self.cruise_btns_msg_canfd]["LDA_BTN"]
+    # LX3 does not report the LFA button in CRUISE_BUTTONS_ALT. It lives in LFA_BUTTON_ALT
+    # (0x10b) byte 10 bit 7, measured on the vehicle: 5 presses produced exactly 5 rising
+    # edges matching the press cadence, and SET-/RES+/gap produced zero. MADS toggles on
+    # ButtonType.lkas, and allow_always is set for CAN-FD Hyundais, so this engages and
+    # disengages lateral independently of cruise.
+    if self.CP.carFingerprint == CAR.HYUNDAI_PALISADE_HEV_LX3:
+      self.lda_button = cp.vl["LFA_BUTTON_ALT"]["LFA_BTN"]
+    else:
+      self.lda_button = cp.vl[self.cruise_btns_msg_canfd]["LDA_BTN"]
     self.buttons_counter = cp.vl[self.cruise_btns_msg_canfd]["COUNTER"]
     ret.accFaulted = cp.vl["TCS"]["ACCEnable"] != 0  # 0 ACC CONTROL ENABLED, 1-3 ACC CONTROL DISABLED
 
