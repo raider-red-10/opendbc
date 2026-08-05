@@ -238,8 +238,12 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
 
     ret.brakePressed = cp.vl["TCS"]["DriverBraking"] == 1
 
-    ret.doorOpen = cp.vl["DOORS_SEATBELTS"]["DRIVER_DOOR"] == 1
-    ret.seatbeltUnlatched = cp.vl["DOORS_SEATBELTS"]["DRIVER_SEATBELT"] == 0
+    # LX3 does not transmit DOORS_SEATBELTS (0x411). Reading it via cp.vl would register
+    # the message with the parser, and a registered message that never arrives fails
+    # state.valid() -> can_valid false -> canError.
+    if self.CP.carFingerprint != CAR.HYUNDAI_PALISADE_HEV_LX3:
+      ret.doorOpen = cp.vl["DOORS_SEATBELTS"]["DRIVER_DOOR"] == 1
+      ret.seatbeltUnlatched = cp.vl["DOORS_SEATBELTS"]["DRIVER_SEATBELT"] == 0
 
     gear = cp.vl[self.gear_msg_canfd]["GEAR"]
     ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(gear))
@@ -261,7 +265,9 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     ret.steerFaultTemporary = cp.vl["MDPS"]["MDPS_LkaFailSta"] != 0
     if self.is_canfd_angle_steering:
       ret.steerFaultTemporary = ret.steerFaultTemporary or cp.vl["MDPS"]["MDPS_ADAS_AciFltSig_Lv2"] != 0
-      self.hands_on_steering_grip = cp.vl["HOD_FD_01_100ms"]["HOD_Dir_Status"]
+      # LX3 does not transmit HOD_FD_01_100ms (0x2af) -- see DOORS_SEATBELTS note above
+      if self.CP.carFingerprint != CAR.HYUNDAI_PALISADE_HEV_LX3:
+        self.hands_on_steering_grip = cp.vl["HOD_FD_01_100ms"]["HOD_Dir_Status"]
       torque_overriding = abs(ret.steeringTorque) > self.params.STEER_THRESHOLD
       ret.steeringPressed = self.update_steering_pressed(torque_overriding, 5)
       self.imu_lateral_acceleration = cp.vl["IMU_01_10ms"]["IMU_LatAccelVal"] * 9.81  # m/s^2
@@ -279,8 +285,10 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     left_blinker_sig, right_blinker_sig = "LEFT_LAMP", "RIGHT_LAMP"
     if self.CP.carFingerprint == CAR.HYUNDAI_KONA_EV_2ND_GEN or self.is_canfd_angle_steering:
       left_blinker_sig, right_blinker_sig = "LEFT_LAMP_ALT", "RIGHT_LAMP_ALT"
-    ret.leftBlinker, ret.rightBlinker = self.update_blinker_from_lamp(50, cp.vl["BLINKERS"][left_blinker_sig],
-                                                                      cp.vl["BLINKERS"][right_blinker_sig])
+    # LX3 does not transmit BLINKERS (0x413) -- see DOORS_SEATBELTS note above
+    if self.CP.carFingerprint != CAR.HYUNDAI_PALISADE_HEV_LX3:
+      ret.leftBlinker, ret.rightBlinker = self.update_blinker_from_lamp(50, cp.vl["BLINKERS"][left_blinker_sig],
+                                                                        cp.vl["BLINKERS"][right_blinker_sig])
     if self.CP.enableBsm:
       ret.leftBlindspot = bool(cp.vl["ADAS_CMD_50_50ms"]["BCW_LtIndSta"])
       ret.rightBlindspot = bool(cp.vl["ADAS_CMD_50_50ms"]["BCW_RtIndSta"])

@@ -49,7 +49,7 @@
 #define HYUNDAI_CANFD_COMMON_RX_CHECKS_CCNC(pt_bus)                                                        \
   {.msg = {{0x35, (pt_bus), 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true},                  \
            {0x100, (pt_bus), 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true},                 \
-           {0x105, (pt_bus), 32, 100U, .max_counter = 0U, .ignore_quality_flag = true}}},                  \
+           {0x105, (pt_bus), 32, 50U, .max_counter = 0U, .ignore_quality_flag = true}}},                   \
   {.msg = {{0x175, (pt_bus), 24, 50U, .max_counter = 0xffU, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
   {.msg = {{0xa0, (pt_bus), 24, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
   {.msg = {{0xea, (pt_bus), 24, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
