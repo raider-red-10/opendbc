@@ -119,9 +119,24 @@ static void hyundai_canfd_rx_hook(const CANPacket_t *msg) {
       } else {
         cruise_button = (msg->data[4] >> 4) & 0x7U;
         main_button = GET_BIT(msg, 34U);
-        mads_button_press = GET_BIT(msg, 39U) ? MADS_BUTTON_PRESSED : MADS_BUTTON_NOT_PRESSED;
+        // CCNC cars do not report the LFA button here -- see 0x10B below. This message
+        // arrives at 50Hz, so leaving this in place would continuously overwrite the
+        // real button state with NOT_PRESSED.
+        if (!get_hyundai_ccnc()) {
+          mads_button_press = GET_BIT(msg, 39U) ? MADS_BUTTON_PRESSED : MADS_BUTTON_NOT_PRESSED;
+        }
       }
       hyundai_common_cruise_buttons_check(cruise_button, main_button);
+    }
+
+    // CCNC cars carry the LFA button in its own message rather than with the cruise
+    // buttons. Measured on a 2026 Palisade Hybrid (LX3): 0x10B byte 10 bit 7, five
+    // presses produced five rising edges matching the press cadence, and SET-/RES+/gap
+    // produced none. Must match the carstate read of LFA_BUTTON_ALT -- if the two
+    // layers disagree, openpilot engages lateral while the panda withholds
+    // controls_allowed_lateral and the mismatch check disengages with a takeover alert.
+    if (get_hyundai_ccnc() && (msg->addr == 0x10BU)) {
+      mads_button_press = GET_BIT(msg, 87U) ? MADS_BUTTON_PRESSED : MADS_BUTTON_NOT_PRESSED;
     }
 
     // gas press, different for EV, hybrid, and ICE models
