@@ -12,6 +12,12 @@ from opendbc.car.hyundai import hyundaican, hyundaicanfd
 from opendbc.car.hyundai.values import HyundaiFlags, Buttons, CANFD_CAR
 from opendbc.sunnypilot.car.intelligent_cruise_button_management_interface_base import IntelligentCruiseButtonManagementInterfaceBase
 
+try:  # instrumentation only -- opendbc must still import standalone, without openpilot
+  from openpilot.sunnypilot.selfdrive.car.lx3_debug import dlog as _dlog
+except Exception:  # pragma: no cover
+  def _dlog(*a, **k):
+    pass
+
 ButtonType = structs.CarState.ButtonEvent.Type
 SendButtonState = structs.IntelligentCruiseButtonManagement.SendButtonState
 
@@ -46,6 +52,9 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
 
   def create_canfd_mock_button_messages(self, packer, CS, CAN, send_button) -> list[CanData]:
     can_sends = []
+    _dlog("icbm.send", dedupe=False, button=send_button, altButtons=bool(self.CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS),
+          haveFrame=bool(getattr(CS, "cruise_btns_alt_info", None)), counter=CS.buttons_counter,
+          sinceLast=self.frame - self.last_button_frame)
     if self.CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS:
       # Same spoofed-counter burst as the 0x1cf path below, against CRUISE_BUTTONS_ALT. The
       # frame is a replay of the car's own last button message, so we cannot send anything
@@ -58,6 +67,8 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
             can_sends.append(hyundaicanfd.create_buttons_alt(packer, self.CP, CAN, CS.cruise_btns_alt_info,
                                                              (CS.buttons_counter + button_counter_offset) % 0x100, send_button))
           self.last_button_frame = self.frame
+          _dlog("icbm.sent", dedupe=False, addr="0x1aa", button=send_button, frames=20,
+                counter=(CS.buttons_counter + button_counter_offset) % 0x100)
     else:
       if (self.frame - self.last_button_frame) * DT_CTRL > 0.2:
         self.button_frame += 1
