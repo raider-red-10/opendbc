@@ -211,7 +211,13 @@ class CarInterface(CarInterfaceBase):
       stock_cp.dashcamOnly = True
 
     if stock_cp.flags & HyundaiFlags.CANFD:
-      if 0x1fa in fingerprint[CAN.ECAN]:
+      # FR_CMR_02_100ms (0x1fa) carries the camera's traffic sign speed limit. carstate_ext
+      # reads it from the E-CAN parser on LKA-steering cars and from the camera parser on
+      # everything else, so check the bus we actually read from. Gating on E-CAN for an
+      # LFA-steering car misses the flag entirely -- and had the flag been set anyway, it
+      # would register a camera message that is not on that bus and invalidate the parser.
+      speed_limit_bus = CAN.ECAN if lka_steering else CAN.CAM
+      if 0x1fa in fingerprint[speed_limit_bus]:
         ret.flags |= HyundaiFlagsSP.SPEED_LIMIT_AVAILABLE.value
     else:
       # Detect smartMDPS, which bypasses EPS low-speed lockout, allowing sunnypilot to send steering commands down to 0
