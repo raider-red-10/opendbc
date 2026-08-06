@@ -40,6 +40,11 @@ BUTTONS = {
 class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManagementInterfaceBase):
   def __init__(self, CP, CP_SP):
     super().__init__(CP, CP_SP)
+    # In-flight LX3 press: how many pressed frames are still to send, which button they hold,
+    # and the genuine counter the last one rode on (-1 = send the next frame immediately)
+    self.lx3_press_frames_left = 0
+    self.lx3_press_accel = False
+    self.lx3_last_ridden_counter = -1
 
   def create_can_mock_button_messages(self, packer, CS, send_button) -> list[CanData]:
     can_sends = []
@@ -60,31 +65,7 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
     _dlog("icbm.send", dedupe=False, button=send_button, altButtons=bool(self.CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS),
           haveFrame=bool(getattr(CS, "cruise_btns_alt_info", None)), counter=CS.buttons_counter,
           sinceLast=self.frame - self.last_button_frame)
-    if self.CP.carFingerprint == CAR.HYUNDAI_PALISADE_HEV_LX3:
-      # This car ignores CRUISE_BUTTONS_ALT (0x1aa) -- it leaves that field at zero and reads
-      # its buttons from LFA_BUTTON_ALT (0x10b) byte 10. Sending on 0x1aa did nothing, which is
-      # why the set speed never followed even once the assist was activating correctly.
-      # Shaped to match a real press, measured from a capture of the driver pressing +,
-      # resume and -: the bit is held for 3-5 frames (80-150ms) and the counter keeps its
-      # natural +2 step the whole time, pressed or idle.
-      #
-      # We were sending 20 frames all carrying the same counter -- 20 duplicates of one stale
-      # frame, which no button module would ever produce and the receiver has every reason to
-      # drop. Send a real press instead: a short burst with the counter advancing by 2.
-      if CS.lfa_btn_info and (self.frame - self.last_button_frame) * DT_CTRL > BUTTON_REPEAT_S:
-        accel = send_button == Buttons.RES_ACCEL
-        base = int(CS.lfa_btn_counter)
-        for i in range(LX3_PRESS_FRAMES):
-          can_sends.append(hyundaicanfd.create_buttons_lx3(
-            packer, self.CP, CAN, CS.lfa_btn_info,
-            (base + LX3_COUNTER_STEP * (i + 1)) % 0x100, accel, not accel))
-        self.last_button_frame = self.frame
-        first = (base + LX3_COUNTER_STEP) % 0x100
-        last = (base + LX3_COUNTER_STEP * LX3_PRESS_FRAMES) % 0x100
-        _dlog("icbm.sent", dedupe=False, addr="0x10b", accel=accel,
-              frames=LX3_PRESS_FRAMES, counter=f"{first}..{last}")
-
-    elif self.CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS:
+    if self.CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS:
       # Same spoofed-counter burst as the 0x1cf path below, against CRUISE_BUTTONS_ALT. The
       # frame is a replay of the car's own last button message, so we cannot send anything
       # before the first one arrives. COUNTER is 8 bits here, not 4.
@@ -109,6 +90,43 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
 
     return can_sends
 
+  def create_lx3_press_messages(self, packer, CS, CAN, send_button) -> list[CanData]:
+    """Press a button the way this car's own module does.
+
+    This car ignores CRUISE_BUTTONS_ALT (0x1aa) -- it leaves that field at zero and reads its
+    buttons from LFA_BUTTON_ALT (0x10b) byte 10. A real press, measured from a capture of the
+    driver pressing +, resume and -, holds the bit across 3-5 consecutive frames of the
+    module's continuous 25Hz stream (80-200ms) while the counter keeps its natural +2 step.
+
+    Queueing all the pressed frames in one 100Hz control cycle put a ~1ms blip on the wire,
+    contradicted within 40ms by the module's next idle frame. Instead: whenever a fresh
+    genuine frame is seen during a press, inject one pressed copy riding one counter step
+    ahead of it, so the press spans real time exactly like the module's own. A started press
+    always runs to completion -- a real press does not un-happen halfway through.
+    """
+    can_sends = []
+    if not CS.lfa_btn_info:
+      return can_sends
+
+    if self.lx3_press_frames_left == 0 and send_button is not None and \
+       (self.frame - self.last_button_frame) * DT_CTRL > BUTTON_REPEAT_S:
+      self.lx3_press_accel = send_button == Buttons.RES_ACCEL
+      self.lx3_press_frames_left = LX3_PRESS_FRAMES
+      self.lx3_last_ridden_counter = -1
+      self.last_button_frame = self.frame
+      _dlog("icbm.send", dedupe=False, addr="0x10b", accel=self.lx3_press_accel, frames=LX3_PRESS_FRAMES)
+
+    if self.lx3_press_frames_left > 0 and int(CS.lfa_btn_counter) != self.lx3_last_ridden_counter:
+      cnt = (int(CS.lfa_btn_counter) + LX3_COUNTER_STEP) % 0x100
+      can_sends.append(hyundaicanfd.create_buttons_lx3(packer, self.CP, CAN, CS.lfa_btn_info, cnt,
+                                                       self.lx3_press_accel, not self.lx3_press_accel))
+      self.lx3_last_ridden_counter = int(CS.lfa_btn_counter)
+      self.lx3_press_frames_left -= 1
+      _dlog("icbm.sent", dedupe=False, addr="0x10b", accel=self.lx3_press_accel,
+            counter=cnt, left=self.lx3_press_frames_left)
+
+    return can_sends
+
   def update(self, CS, CC_SP, packer, frame, last_button_frame, CAN) -> list[CanData]:
     can_sends = []
     self.CC_SP = CC_SP
@@ -116,7 +134,11 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
     self.frame = frame
     self.last_button_frame = last_button_frame
 
-    if self.ICBM.sendButton != SendButtonState.none:
+    if self.CP.carFingerprint == CAR.HYUNDAI_PALISADE_HEV_LX3:
+      # None while no press is requested; an in-flight press still drains to completion
+      send_button = BUTTONS.get(self.ICBM.sendButton)
+      can_sends.extend(self.create_lx3_press_messages(packer, CS, CAN, send_button))
+    elif self.ICBM.sendButton != SendButtonState.none:
       send_button = BUTTONS[self.ICBM.sendButton]
 
       if self.CP.carFingerprint in CANFD_CAR:
