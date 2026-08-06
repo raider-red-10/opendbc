@@ -39,6 +39,7 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     self.lda_button = 0
     # LX3 steering wheel buttons, all in LFA_BUTTON_ALT (0x10b) byte 10
     self.accel_button = self.decel_button = self.resume_button = 0
+    self.other_button = 0
 
     self.gear_msg_canfd = "ACCELERATOR" if CP.flags & HyundaiFlags.EV else \
                           "GEAR_ALT" if CP.flags & HyundaiFlags.CANFD_ALT_GEARS else \
@@ -88,6 +89,46 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     # To avoid re-engaging when openpilot cancels, check user engagement intention via buttons
     # Main button also can trigger an engagement on these cars
     return any(btn in ENABLE_BUTTONS for btn in self.cruise_buttons) or any(self.main_buttons)
+
+  def _update_lx3_buttons(self, btns) -> list[structs.CarState.ButtonEvent]:
+    """Read the LX3's steering wheel cluster and feed the button-interaction window.
+
+    This car leaves CRUISE_BUTTONS_ALT (0x1aa) at zero and reports the whole cluster in
+    LFA_BUTTON_ALT (0x10b) byte 10: bit 0 +, bit 1 -, bit 2 resume, bit 3 the cancel/set
+    toggle, bit 7 LFA. Measured on the vehicle. Unlike most Hyundais, + and resume are
+    separate buttons, so they map to separate ButtonTypes.
+
+    The cruise_buttons deque must be fed from here too: blockPcmEnable keys off
+    recent_button_interaction(), and with the deque fed from 0x1aa's zeros openpilot never
+    reported itself engaged. pandad's heartbeat then told the panda controls were unused, and
+    the panda cleared controls_allowed 3 heartbeats (~2.5s, measured) after every cruise
+    engagement -- rejecting every ICBM button frame after that. Only a fresh frame may append:
+    carstate runs at 100Hz but the message is 25Hz, and the window has to span the same
+    ~320ms as panda's own 8-sample interaction check.
+
+    The cancel/set toggle joins the deque as CANCEL (it engages cruise, so it must count as
+    interaction) but deliberately emits no ButtonEvent: a cancel event would read as a user
+    disengage request at the exact moment the driver engages with it.
+    """
+    prev_accel, prev_decel = self.accel_button, self.decel_button
+    prev_resume = self.resume_button
+    fresh = btns["COUNTER_ALT"] != self.lfa_btn_counter
+    self.lfa_btn_info = copy.copy(btns)
+    self.lfa_btn_counter = btns["COUNTER_ALT"]
+    self.lda_button = btns["LFA_BTN"]
+    self.accel_button = btns["ACCEL_BTN"]
+    self.decel_button = btns["DECEL_BTN"]
+    self.resume_button = btns["RESUME_BTN"]
+    self.other_button = int(btns["BTN_OTHER"]) & 1
+
+    if fresh:
+      self.cruise_buttons.extend([Buttons.SET_DECEL if self.decel_button else
+                                  Buttons.RES_ACCEL if (self.accel_button or self.resume_button) else
+                                  Buttons.CANCEL if self.other_button else Buttons.NONE])
+
+    return [*create_button_events(self.accel_button, prev_accel, {1: ButtonType.accelCruise}),
+            *create_button_events(self.decel_button, prev_decel, {1: ButtonType.decelCruise}),
+            *create_button_events(self.resume_button, prev_resume, {1: ButtonType.resumeCruise})]
 
   def update(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
     cp = can_parsers[Bus.pt]
@@ -341,30 +382,20 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     prev_cruise_buttons = self.cruise_buttons[-1]
     prev_main_buttons = self.main_buttons[-1]
     prev_lda_button = self.lda_button
-    self.cruise_buttons.extend(cp.vl_all[self.cruise_btns_msg_canfd]["CRUISE_BUTTONS"])
+    is_lx3 = self.CP.carFingerprint == CAR.HYUNDAI_PALISADE_HEV_LX3
+    if not is_lx3:
+      # LX3: 0x1aa's button field is always zero; the deque is fed from 0x10b in
+      # _update_lx3_buttons instead, or the interaction window would read permanently empty
+      self.cruise_buttons.extend(cp.vl_all[self.cruise_btns_msg_canfd]["CRUISE_BUTTONS"])
     self.main_buttons.extend(cp.vl_all[self.cruise_btns_msg_canfd]["ADAPTIVE_CRUISE_MAIN_BTN"])
     # LX3 does not report the LFA button in CRUISE_BUTTONS_ALT. It lives in LFA_BUTTON_ALT
     # (0x10b) byte 10 bit 7, measured on the vehicle: 5 presses produced exactly 5 rising
     # edges matching the press cadence, and SET-/RES+/gap produced zero. MADS toggles on
     # ButtonType.lkas, and allow_always is set for CAN-FD Hyundais, so this engages and
     # disengages lateral independently of cruise.
-    prev_accel_button, prev_decel_button = self.accel_button, self.decel_button
-    prev_resume_button = self.resume_button
-    if self.CP.carFingerprint == CAR.HYUNDAI_PALISADE_HEV_LX3:
-      # This car leaves CRUISE_BUTTONS_ALT (0x1aa) at zero and reports the whole steering wheel
-      # cluster in LFA_BUTTON_ALT (0x10b) byte 10: bit 0 +, bit 1 -, bit 2 resume, bit 7 LFA.
-      # Measured on the vehicle. Reading 0x1aa means no cruise buttonEvent is ever generated,
-      # so Speed Limit Assist waits forever for a confirm press that cannot arrive.
-      #
-      # Unlike most Hyundais, + and resume are separate buttons here, so they map to separate
-      # ButtonTypes rather than both becoming RES_ACCEL.
-      btns = cp.vl["LFA_BUTTON_ALT"]
-      self.lfa_btn_info = copy.copy(btns)
-      self.lfa_btn_counter = btns["COUNTER_ALT"]
-      self.lda_button = btns["LFA_BTN"]
-      self.accel_button = btns["ACCEL_BTN"]
-      self.decel_button = btns["DECEL_BTN"]
-      self.resume_button = btns["RESUME_BTN"]
+    lx3_button_events = []
+    if is_lx3:
+      lx3_button_events = self._update_lx3_buttons(cp.vl["LFA_BUTTON_ALT"])
     else:
       self.lda_button = cp.vl[self.cruise_btns_msg_canfd]["LDA_BTN"]
     self.buttons_counter = cp.vl[self.cruise_btns_msg_canfd]["COUNTER"]
@@ -378,16 +409,12 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
 
     MadsCarState.update_mads_canfd(self, ret, can_parsers)
 
-    button_events = [*create_button_events(self.cruise_buttons[-1], prev_cruise_buttons, BUTTONS_DICT),
+    # LX3: cruise-button events come from _update_lx3_buttons -- generating them from the
+    # deque too would double every press
+    button_events = [*(create_button_events(self.cruise_buttons[-1], prev_cruise_buttons, BUTTONS_DICT) if not is_lx3 else []),
                      *create_button_events(self.main_buttons[-1], prev_main_buttons, {1: ButtonType.mainCruise}),
-                     *create_button_events(self.lda_button, prev_lda_button, {1: ButtonType.lkas})]
-
-    if self.CP.carFingerprint == CAR.HYUNDAI_PALISADE_HEV_LX3:
-      button_events += [
-        *create_button_events(self.accel_button, prev_accel_button, {1: ButtonType.accelCruise}),
-        *create_button_events(self.decel_button, prev_decel_button, {1: ButtonType.decelCruise}),
-        *create_button_events(self.resume_button, prev_resume_button, {1: ButtonType.resumeCruise}),
-      ]
+                     *create_button_events(self.lda_button, prev_lda_button, {1: ButtonType.lkas}),
+                     *lx3_button_events]
 
     ret.buttonEvents = button_events
 

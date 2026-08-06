@@ -73,12 +73,13 @@ class TestLx3PressCadence(unittest.TestCase):
                             f"press collapsed in time: {ticks}")
 
   def test_counters_ride_the_live_stream(self):
-    # Each injected frame sits one step ahead of the genuine frame it follows, so the
-    # sequence advances by 2 across the press exactly like the module's own counter.
-    sends = self.run_ticks(20)
-    counters = [msg[1][2] for _, msg in sends]
-    start = (100 + LX3_COUNTER_STEP) % 0x100
-    self.assertEqual(counters, [(start + LX3_COUNTER_STEP * i) % 0x100 for i in range(LX3_PRESS_FRAMES)])
+    # Every injected frame sits one step ahead of the genuine frame it follows, across
+    # presses -- the genuine counter at tick t is 100 + 2*(t//4)
+    sends = self.run_ticks(45)
+    self.assertGreater(len(sends), LX3_PRESS_FRAMES)  # spans at least two presses
+    for t, msg in sends:
+      genuine = (100 + LX3_COUNTER_STEP * (t // GENUINE_PERIOD)) % 0x100
+      self.assertEqual(msg[1][2], (genuine + LX3_COUNTER_STEP) % 0x100, f"at tick {t}")
 
   def test_press_completes_after_request_clears(self):
     # ICBM may stop asking mid-press; a real press does not un-happen halfway through.

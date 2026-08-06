@@ -697,6 +697,43 @@ class TestHyundaiCanfdCcncAltButtonsTx(unittest.TestCase):
         self._rx(self._pcm_status_msg(engaged))
         self.assertEqual(engaged, self._tx(self._button_msg(Buttons.CANCEL)))
 
+  def _lfa_btn_msg(self, accel=0, decel=0, resume=0, other=0):
+    values = {"ACCEL_BTN": accel, "DECEL_BTN": decel, "RESUME_BTN": resume, "BTN_OTHER": other}
+    return self.packer.make_can_msg_safety("LFA_BUTTON_ALT", self.PT_BUS, values)
+
+  def _saturate_interaction(self):
+    for _ in range(10):
+      self._rx(self._lfa_btn_msg())
+
+  def test_real_buttons_latch_controls_on_engage(self):
+    # non-longitudinal latch: cruise-engaged rising edge with a recent button press
+    for btn in ("accel", "decel", "resume"):
+      with self.subTest(btn=btn):
+        self.safety.set_controls_allowed(0)
+        self._rx(self._pcm_status_msg(False))
+        self._saturate_interaction()
+        self._rx(self._lfa_btn_msg(**{btn: 1}))
+        self._rx(self._pcm_status_msg(True))
+        self.assertTrue(self.safety.get_controls_allowed())
+
+  def test_set_toggle_latches_controls_on_engage(self):
+    # byte 10 bit 3 is the cancel/set toggle: it engages cruise from nothing, measured on the
+    # vehicle (255 -> current speed). Without counting it as interaction, engaging with it
+    # leaves controls_allowed unlatched and every ICBM button frame is rejected.
+    self.safety.set_controls_allowed(0)
+    self._rx(self._pcm_status_msg(False))
+    self._saturate_interaction()
+    self._rx(self._lfa_btn_msg(other=1))
+    self._rx(self._pcm_status_msg(True))
+    self.assertTrue(self.safety.get_controls_allowed())
+
+  def test_no_recent_button_no_latch(self):
+    self.safety.set_controls_allowed(0)
+    self._rx(self._pcm_status_msg(False))
+    self._saturate_interaction()
+    self._rx(self._pcm_status_msg(True))
+    self.assertFalse(self.safety.get_controls_allowed())
+
   def test_no_other_button_value_is_accepted(self):
     # Only the three buttons ICBM and cancel actually use may go out, whatever the state
     self.safety.set_controls_allowed(1)

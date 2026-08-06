@@ -150,13 +150,18 @@ static void hyundai_canfd_rx_hook(const CANPacket_t *msg) {
       mads_button_press = GET_BIT(msg, 87U) ? MADS_BUTTON_PRESSED : MADS_BUTTON_NOT_PRESSED;
 
       // The cruise buttons live here too, one bit each, rather than as an enum: bit 80 is +,
-      // bit 81 is -, bit 82 is resume. Measured on a 2026 Palisade Hybrid (LX3). + and resume
-      // are separate buttons on this car, unlike most Hyundais where RES_ACCEL is both.
+      // bit 81 is -, bit 82 is resume, bit 83 the cancel/set toggle. Measured on a 2026
+      // Palisade Hybrid (LX3). + and resume are separate buttons on this car, unlike most
+      // Hyundais where RES_ACCEL is both. The toggle engages cruise from nothing (255 ->
+      // current speed on the vehicle), so it must count as a button interaction or engaging
+      // with it never latches controls_allowed and every ICBM button frame is rejected.
       int cruise_button = HYUNDAI_BTN_NONE;
       if (GET_BIT(msg, 80U) || GET_BIT(msg, 82U)) {
         cruise_button = HYUNDAI_BTN_RESUME;
       } else if (GET_BIT(msg, 81U)) {
         cruise_button = HYUNDAI_BTN_SET;
+      } else if (GET_BIT(msg, 83U)) {
+        cruise_button = HYUNDAI_BTN_CANCEL;
       } else {
       }
       hyundai_common_cruise_buttons_check(cruise_button, false);

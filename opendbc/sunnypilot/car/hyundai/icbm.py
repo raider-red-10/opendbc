@@ -21,8 +21,12 @@ except Exception:  # pragma: no cover
 ButtonType = structs.CarState.ButtonEvent.Type
 SendButtonState = structs.IntelligentCruiseButtonManagement.SendButtonState
 
-# Measured on a 2026 Palisade (LX3) from a capture of real presses
-LX3_PRESS_FRAMES = 4     # a real press is held 3-5 frames
+# Measured on a 2026 Palisade (LX3) from road captures. A driver's press holds the bit across
+# 2-5 consecutive frames of the module's own stream and counts once. Our frames interleave
+# with the module's continuing idle stream, so the SCC sees a release after every one and
+# counts each injected frame as its own press: 11 accepted pressed frames moved the set speed
+# by 10. One frame per press, spaced by the repeat gap, gives exactly +/-1 per press.
+LX3_PRESS_FRAMES = 1
 LX3_COUNTER_STEP = 2     # 0x10b's counter advances by 2 per frame, idle and pressed
 BUTTON_REPEAT_S = 0.25   # shortest observed gap between real presses was 121ms
 

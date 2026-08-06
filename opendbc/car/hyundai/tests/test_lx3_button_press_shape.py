@@ -23,9 +23,11 @@ REAL_PLUS = bytes.fromhex("f5bc4e00000000000000012000000000")
 
 
 class TestLx3ButtonPressShape(unittest.TestCase):
-  """ICBM sent 20 frames all carrying the same counter -- 20 duplicates of one stale frame,
-  which no button module produces. A real press is a short burst with the counter still
-  advancing."""
+  """A driver's press holds the bit across 2-5 consecutive frames of the module's own stream
+  and counts once. Our injected frames interleave with the module's continuing idle stream,
+  so the SCC sees a release after every one of them and counts EVERY frame as its own press --
+  measured on the road: 11 accepted pressed frames moved the set speed by 10. The press is
+  therefore exactly one frame; the repeat gap in icbm.py spaces distinct presses."""
 
   def setUp(self):
     c = CAR.HYUNDAI_PALISADE_HEV_LX3
@@ -48,23 +50,16 @@ class TestLx3ButtonPressShape(unittest.TestCase):
       out.append(dat)
     return out
 
-  def test_burst_length_matches_a_real_press(self):
-    self.assertIn(LX3_PRESS_FRAMES, REAL_FRAMES)
+  def test_press_is_a_single_frame(self):
+    # One injected frame = one increment at the SCC (the genuine idle stream provides the
+    # release edge). Multi-frame presses each counted multiple times on the road.
+    self.assertEqual(LX3_PRESS_FRAMES, 1)
 
-  def test_counter_advances_across_the_burst(self):
-    ctrs = [d[2] for d in self.burst()]
-    self.assertEqual({b - a for a, b in zip(ctrs, ctrs[1:], strict=False)}, {REAL_STEP},
-                     f"counter must advance by {REAL_STEP} per frame, got {ctrs}")
-
-  def test_counter_is_not_frozen(self):
-    # The specific defect: every frame carrying the same counter
-    ctrs = [d[2] for d in self.burst()]
-    self.assertEqual(len(set(ctrs)), len(ctrs), "all frames share one counter value")
-
-  def test_counter_wraps(self):
-    ctrs = [d[2] for d in self.burst(base=250)]
-    self.assertTrue(all(0 <= c <= 255 for c in ctrs), ctrs)
-    self.assertEqual({(b - a) % 256 for a, b in zip(ctrs, ctrs[1:], strict=False)}, {REAL_STEP})
+  def test_counter_rides_one_step_ahead(self):
+    for base in (100, 250, 254):
+      with self.subTest(base=base):
+        ctrs = [d[2] for d in self.burst(base=base)]
+        self.assertEqual(ctrs, [(base + REAL_STEP) % 256])
 
   def test_replaying_a_captured_frame_is_byte_exact(self):
     """We rebuild from parsed signals, so any byte the DBC does not describe packs as zero.
