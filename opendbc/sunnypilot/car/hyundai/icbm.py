@@ -59,9 +59,14 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
       # This car ignores CRUISE_BUTTONS_ALT (0x1aa) -- it leaves that field at zero and reads
       # its buttons from LFA_BUTTON_ALT (0x10b) byte 10. Sending on 0x1aa did nothing, which is
       # why the set speed never followed even once the assist was activating correctly.
+      # This car's 0x10b counter advances by 2 per frame, not 1 -- measured from the burst
+      # deltas in a drive log: 10.6 counts per 0.21s burst on a 25Hz message is 2.02/frame.
+      # Spoofing last+1 lands between two legitimate values, so every frame we sent was a
+      # counter violation and the camera dropped all of them. Same +2 quirk as 0x105 on
+      # this platform.
       if CS.lfa_btn_info and (self.frame - self.last_button_frame) * DT_CTRL > 0.2:
         self.button_frame += 1
-        button_counter_offset = [1, 1, 0, None][self.button_frame % 4]
+        button_counter_offset = [2, 2, 0, None][self.button_frame % 4]
         if button_counter_offset is not None:
           accel = send_button == Buttons.RES_ACCEL
           for _ in range(20):
