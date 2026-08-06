@@ -37,6 +37,8 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     self.cruise_buttons: deque = deque([Buttons.NONE] * PREV_BUTTON_SAMPLES, maxlen=PREV_BUTTON_SAMPLES)
     self.main_buttons: deque = deque([Buttons.NONE] * PREV_BUTTON_SAMPLES, maxlen=PREV_BUTTON_SAMPLES)
     self.lda_button = 0
+    # LX3 steering wheel buttons, all in LFA_BUTTON_ALT (0x10b) byte 10
+    self.accel_button = self.decel_button = self.resume_button = 0
 
     self.gear_msg_canfd = "ACCELERATOR" if CP.flags & HyundaiFlags.EV else \
                           "GEAR_ALT" if CP.flags & HyundaiFlags.CANFD_ALT_GEARS else \
@@ -343,8 +345,21 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     # edges matching the press cadence, and SET-/RES+/gap produced zero. MADS toggles on
     # ButtonType.lkas, and allow_always is set for CAN-FD Hyundais, so this engages and
     # disengages lateral independently of cruise.
+    prev_accel_button, prev_decel_button = self.accel_button, self.decel_button
+    prev_resume_button = self.resume_button
     if self.CP.carFingerprint == CAR.HYUNDAI_PALISADE_HEV_LX3:
-      self.lda_button = cp.vl["LFA_BUTTON_ALT"]["LFA_BTN"]
+      # This car leaves CRUISE_BUTTONS_ALT (0x1aa) at zero and reports the whole steering wheel
+      # cluster in LFA_BUTTON_ALT (0x10b) byte 10: bit 0 +, bit 1 -, bit 2 resume, bit 7 LFA.
+      # Measured on the vehicle. Reading 0x1aa means no cruise buttonEvent is ever generated,
+      # so Speed Limit Assist waits forever for a confirm press that cannot arrive.
+      #
+      # Unlike most Hyundais, + and resume are separate buttons here, so they map to separate
+      # ButtonTypes rather than both becoming RES_ACCEL.
+      btns = cp.vl["LFA_BUTTON_ALT"]
+      self.lda_button = btns["LFA_BTN"]
+      self.accel_button = btns["ACCEL_BTN"]
+      self.decel_button = btns["DECEL_BTN"]
+      self.resume_button = btns["RESUME_BTN"]
     else:
       self.lda_button = cp.vl[self.cruise_btns_msg_canfd]["LDA_BTN"]
     self.buttons_counter = cp.vl[self.cruise_btns_msg_canfd]["COUNTER"]
@@ -358,9 +373,18 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
 
     MadsCarState.update_mads_canfd(self, ret, can_parsers)
 
-    ret.buttonEvents = [*create_button_events(self.cruise_buttons[-1], prev_cruise_buttons, BUTTONS_DICT),
-                        *create_button_events(self.main_buttons[-1], prev_main_buttons, {1: ButtonType.mainCruise}),
-                        *create_button_events(self.lda_button, prev_lda_button, {1: ButtonType.lkas})]
+    button_events = [*create_button_events(self.cruise_buttons[-1], prev_cruise_buttons, BUTTONS_DICT),
+                     *create_button_events(self.main_buttons[-1], prev_main_buttons, {1: ButtonType.mainCruise}),
+                     *create_button_events(self.lda_button, prev_lda_button, {1: ButtonType.lkas})]
+
+    if self.CP.carFingerprint == CAR.HYUNDAI_PALISADE_HEV_LX3:
+      button_events += [
+        *create_button_events(self.accel_button, prev_accel_button, {1: ButtonType.accelCruise}),
+        *create_button_events(self.decel_button, prev_decel_button, {1: ButtonType.decelCruise}),
+        *create_button_events(self.resume_button, prev_resume_button, {1: ButtonType.resumeCruise}),
+      ]
+
+    ret.buttonEvents = button_events
 
     if self.CP.openpilotLongitudinalControl:
       ret.cruiseState.available = self.get_main_cruise(ret)
