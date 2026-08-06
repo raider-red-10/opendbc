@@ -68,6 +68,9 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     self.cruise_info = {}
     # Last CRUISE_BUTTONS_ALT frame, replayed by ICBM to inject a button press
     self.cruise_btns_alt_info = {}
+    # Last LFA_BUTTON_ALT frame -- the message this car really reads buttons from
+    self.lfa_btn_info = {}
+    self.lfa_btn_counter = 0
     # CCNC cluster messages, captured from the camera and retransmitted on HDA1 CCNC cars
     self.msg_161, self.msg_162, self.msg_1b5 = {}, {}, {}
 
@@ -356,6 +359,8 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
       # Unlike most Hyundais, + and resume are separate buttons here, so they map to separate
       # ButtonTypes rather than both becoming RES_ACCEL.
       btns = cp.vl["LFA_BUTTON_ALT"]
+      self.lfa_btn_info = copy.copy(btns)
+      self.lfa_btn_counter = btns["COUNTER_ALT"]
       self.lda_button = btns["LFA_BTN"]
       self.accel_button = btns["ACCEL_BTN"]
       self.decel_button = btns["DECEL_BTN"]

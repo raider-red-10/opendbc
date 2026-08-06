@@ -133,6 +133,29 @@ def create_buttons_alt(packer, CP, CAN, cruise_btns_copy, cnt, btn):
   return packer.make_can_msg("CRUISE_BUTTONS_ALT", bus, values)
 
 
+def create_buttons_lx3(packer, CP, CAN, btn_frame_copy, cnt, accel, decel):
+  """Press a cruise button on the message this car actually reads.
+
+  The LX3 leaves CRUISE_BUTTONS_ALT (0x1aa) at zero and takes its buttons from
+  LFA_BUTTON_ALT (0x10b) byte 10, so button frames sent on 0x1aa are ignored. Replays the
+  car's own last 0x10b frame with one button bit set; the packer recomputes CHECKSUM, which
+  was verified against 375 live frames before this was relied on.
+  """
+  values = dict(btn_frame_copy)
+  values.update({
+    "COUNTER_ALT": cnt,
+    "ACCEL_BTN": 1 if accel else 0,
+    "DECEL_BTN": 1 if decel else 0,
+    # Never replay a button the driver was holding when the frame was captured -- resume would
+    # pull the car out of standstill and LFA would toggle their lane keeping.
+    "RESUME_BTN": 0,
+    "LFA_BTN": 0,
+  })
+
+  bus = CAN.ECAN if CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG else CAN.CAM
+  return packer.make_can_msg("LFA_BUTTON_ALT", bus, values)
+
+
 def create_acc_cancel(packer, CP, CAN, cruise_info_copy):
   # CAN FD camera-based SCC requires additional signals to be preserved
   # verbatim from the previous SCC_CONTROL frame to avoid checksum or

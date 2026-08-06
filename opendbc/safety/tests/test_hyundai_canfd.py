@@ -707,6 +707,38 @@ class TestHyundaiCanfdCcncAltButtonsTx(unittest.TestCase):
       with self.subTest(btn=btn):
         self.assertFalse(self._tx(self._button_msg(btn)))
 
+  def _lfa_button_msg(self, accel=0, decel=0, resume=0, lfa=0):
+    values = {"ACCEL_BTN": accel, "DECEL_BTN": decel, "RESUME_BTN": resume, "LFA_BTN": lfa}
+    return self.packer.make_can_msg_safety("LFA_BUTTON_ALT", self.BUTTONS_TX_BUS, values)
+
+  def test_lfa_button_msg_requires_controls_allowed(self):
+    """0x10b is the only message the LX3 reads presses from, so it is real actuation."""
+    for allowed in (False, True):
+      self.safety.set_controls_allowed(allowed)
+      for kwargs in ({"accel": 1}, {"decel": 1}):
+        with self.subTest(allowed=allowed, kwargs=kwargs):
+          self.assertEqual(allowed, self._tx(self._lfa_button_msg(**kwargs)))
+
+  def test_lfa_button_msg_rejects_resume_and_lfa(self):
+    # Resume would pull the car out of standstill; the LFA bit would toggle the driver's
+    # lane keeping. Neither is ever ours to send.
+    self.safety.set_controls_allowed(1)
+    for kwargs in ({"resume": 1}, {"lfa": 1}, {"accel": 1, "resume": 1}, {"decel": 1, "lfa": 1}):
+      with self.subTest(kwargs=kwargs):
+        self.assertFalse(self._tx(self._lfa_button_msg(**kwargs)))
+
+  def test_lfa_button_msg_rejects_both_or_neither(self):
+    # Exactly one of accel/decel -- both at once is not a press a driver could make
+    self.safety.set_controls_allowed(1)
+    self.assertFalse(self._tx(self._lfa_button_msg(accel=1, decel=1)))
+    self.assertFalse(self._tx(self._lfa_button_msg()))
+
+  def test_lfa_button_msg_blocked_without_the_alt_buttons_flag(self):
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfd, self.CCNC_PARAM & ~HyundaiSafetyFlags.CANFD_ALT_BUTTONS)
+    self.safety.init_tests()
+    self.safety.set_controls_allowed(1)
+    self.assertFalse(self._tx(self._lfa_button_msg(accel=1)))
+
   def test_blocked_without_the_alt_buttons_flag(self):
     # A CCNC car that uses the standard 0x1cf message must not be able to send 0x1aa
     self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfd, self.CCNC_PARAM & ~HyundaiSafetyFlags.CANFD_ALT_BUTTONS)

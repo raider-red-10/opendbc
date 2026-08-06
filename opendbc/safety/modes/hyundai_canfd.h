@@ -287,6 +287,20 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
     }
   }
 
+  // LFA_BUTTON_ALT carries one bit per button in byte 10 rather than a button enum, and is the
+  // only message the LX3 reads presses from. Accel and decel adjust the set speed, so they need
+  // controls_allowed; resume and the LFA button are never ours to send.
+  if (msg->addr == 0x10BU) {
+    bool accel = GET_BIT(msg, 80U);
+    bool decel = GET_BIT(msg, 81U);
+    bool resume = GET_BIT(msg, 82U);
+    bool lfa = GET_BIT(msg, 87U);
+    bool one_button = (accel != decel);  // exactly one of the two, never both
+    if (!hyundai_canfd_alt_buttons || resume || lfa || !one_button || !controls_allowed) {
+      tx = false;
+    }
+  }
+
   // cruise buttons check
   if ((msg->addr == 0x1cfU) || (msg->addr == 0x1aaU)) {
     int button = 0;
@@ -401,6 +415,7 @@ static safety_config hyundai_canfd_init(uint16_t param) {
 #define HYUNDAI_CANFD_LFA_STEERING_CAMERA_SCC_CCNC_TX_MSGS(longitudinal) \
     HYUNDAI_CANFD_CRUISE_BUTTON_TX_MSGS(2) \
     {0x1AA, 2, 16, .check_relay = false}, /* CRUISE_BUTTONS_ALT -- ICBM on alt-button cars */ \
+    {0x10B, 2, 16, .check_relay = false}, /* LFA_BUTTON_ALT -- buttons the LX3 actually reads */ \
     HYUNDAI_CANFD_LFA_STEERING_COMMON_TX_MSGS(0) \
     HYUNDAI_CANFD_SCC_CONTROL_COMMON_TX_MSGS(0, (longitudinal)) \
     {0xCB,  0, 24, .check_relay = true}, /* LFA_ALT -- HDA1 angle steering */ \

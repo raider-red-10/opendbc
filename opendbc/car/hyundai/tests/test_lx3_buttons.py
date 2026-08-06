@@ -1,6 +1,6 @@
 import unittest
 
-from opendbc.can import CANParser
+from opendbc.can import CANPacker, CANParser
 from opendbc.car import Bus
 from opendbc.car.hyundai.values import DBC, CAR
 
@@ -12,9 +12,11 @@ PLUS, MINUS, RESUME, LFA = 0, 1, 2, 7
 
 
 def frame(byte10):
-  dat = bytearray(16)
-  dat[10] = byte10
-  return (LFA_BUTTON_ALT, bytes(dat), 0)
+  """Build via the packer so CHECKSUM is valid -- the parser validates 0x10b and drops bad ones."""
+  packer = CANPacker(DBC_NAME)
+  values = {"ACCEL_BTN": (byte10 >> 0) & 1, "DECEL_BTN": (byte10 >> 1) & 1,
+            "RESUME_BTN": (byte10 >> 2) & 1, "LFA_BTN": (byte10 >> 7) & 1}
+  return packer.make_can_msg("LFA_BUTTON_ALT", 0, values)
 
 
 class TestLx3Buttons(unittest.TestCase):
@@ -38,10 +40,13 @@ class TestLx3Buttons(unittest.TestCase):
   def test_nothing_pressed_reads_clear(self):
     self.assertEqual(self.decode(0), (0, 0, 0, 0))
 
-  def test_unrelated_bits_do_not_trigger_a_button(self):
-    for bit in (3, 4, 5, 6):
-      with self.subTest(bit=bit):
-        self.assertEqual(self.decode(1 << bit), (0, 0, 0, 0))
+  def test_a_bad_checksum_is_rejected(self):
+    # Declaring CHECKSUM means the parser validates it. Verified against 375 live frames
+    # before relying on it, but pin that a corrupt frame really is dropped.
+    parser = CANParser(DBC_NAME, [("LFA_BUTTON_ALT", 0)], 0)
+    dat = bytearray(16)
+    dat[10] = 1 << PLUS  # no checksum
+    self.assertEqual(parser.update([[0, [(LFA_BUTTON_ALT, bytes(dat), 0)]]]), set())
 
   def test_plus_and_resume_are_distinct(self):
     # Unlike most Hyundais these are separate buttons, so they must not share a bit

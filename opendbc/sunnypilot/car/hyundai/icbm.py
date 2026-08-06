@@ -9,7 +9,7 @@ import numpy as np
 from opendbc.car import DT_CTRL, structs
 from opendbc.car.can_definitions import CanData
 from opendbc.car.hyundai import hyundaican, hyundaicanfd
-from opendbc.car.hyundai.values import HyundaiFlags, Buttons, CANFD_CAR
+from opendbc.car.hyundai.values import CAR, HyundaiFlags, Buttons, CANFD_CAR
 from opendbc.sunnypilot.car.intelligent_cruise_button_management_interface_base import IntelligentCruiseButtonManagementInterfaceBase
 
 try:  # instrumentation only -- opendbc must still import standalone, without openpilot
@@ -55,7 +55,24 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
     _dlog("icbm.send", dedupe=False, button=send_button, altButtons=bool(self.CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS),
           haveFrame=bool(getattr(CS, "cruise_btns_alt_info", None)), counter=CS.buttons_counter,
           sinceLast=self.frame - self.last_button_frame)
-    if self.CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS:
+    if self.CP.carFingerprint == CAR.HYUNDAI_PALISADE_HEV_LX3:
+      # This car ignores CRUISE_BUTTONS_ALT (0x1aa) -- it leaves that field at zero and reads
+      # its buttons from LFA_BUTTON_ALT (0x10b) byte 10. Sending on 0x1aa did nothing, which is
+      # why the set speed never followed even once the assist was activating correctly.
+      if CS.lfa_btn_info and (self.frame - self.last_button_frame) * DT_CTRL > 0.2:
+        self.button_frame += 1
+        button_counter_offset = [1, 1, 0, None][self.button_frame % 4]
+        if button_counter_offset is not None:
+          accel = send_button == Buttons.RES_ACCEL
+          for _ in range(20):
+            can_sends.append(hyundaicanfd.create_buttons_lx3(
+              packer, self.CP, CAN, CS.lfa_btn_info,
+              (int(CS.lfa_btn_counter) + button_counter_offset) % 0x100, accel, not accel))
+          self.last_button_frame = self.frame
+          _dlog("icbm.sent", dedupe=False, addr="0x10b", accel=accel, frames=20,
+                counter=(int(CS.lfa_btn_counter) + button_counter_offset) % 0x100)
+
+    elif self.CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS:
       # Same spoofed-counter burst as the 0x1cf path below, against CRUISE_BUTTONS_ALT. The
       # frame is a replay of the car's own last button message, so we cannot send anything
       # before the first one arrives. COUNTER is 8 bits here, not 4.
