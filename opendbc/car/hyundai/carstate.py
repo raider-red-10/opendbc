@@ -317,7 +317,13 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
       cp_cruise_info = cp_cam if self.CP.flags & HyundaiFlags.CANFD_CAMERA_SCC else cp
       ret.cruiseState.enabled = cp_cruise_info.vl["SCC_CONTROL"]["ACCMode"] in (1, 2)
       ret.cruiseState.standstill = cp_cruise_info.vl["SCC_CONTROL"]["CRUISE_STANDSTILL"] == 1
-      ret.cruiseState.speed = cp_cruise_info.vl["SCC_CONTROL"]["VSetDis"] * speed_factor
+      # The SCC reports VSetDis = 255 when it has no set speed, which is not a speed. Passed
+      # through it becomes 255 mph (410 kph); the planner then clamps that to V_CRUISE_MAX and
+      # ICBM spends the drive pressing buttons to drag the car to 90 mph. Measured on a 2026
+      # Palisade with cruise off: carSetMph=255, vTargetMph=90. openpilot already reads 0 as
+      # unset, so normalise onto that.
+      v_set_dis = cp_cruise_info.vl["SCC_CONTROL"]["VSetDis"]
+      ret.cruiseState.speed = 0. if v_set_dis >= 255 else v_set_dis * speed_factor
       self.cruise_info = copy.copy(cp_cruise_info.vl["SCC_CONTROL"])
 
     # Manual Speed Limit Assist is a feature that replaces non-adaptive cruise control on EV CAN FD platforms.
