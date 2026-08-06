@@ -54,9 +54,16 @@
   {.msg = {{0xa0, (pt_bus), 24, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
   {.msg = {{0xea, (pt_bus), 24, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
 
+// LFA_BUTTON_ALT (0x10b) carries this car's real buttons -- cruise and LFA both. The rx hook
+// only runs for addresses in this list, so without it panda never saw a button at all:
+// hyundai_last_button_interaction saturated, controls_allowed never latched on the
+// cruise-engaged rising edge, and every button openpilot tried to send was rejected.
+// 25Hz measured on the vehicle. Its counter steps by 2, which the +1 counter check can never
+// satisfy -- same quirk as 0x105 above, so skip that check; checksum and frequency still apply.
 #define HYUNDAI_CANFD_ALT_BUTTONS_RX_CHECKS_CCNC(pt_bus)                                                                                         \
   HYUNDAI_CANFD_COMMON_RX_CHECKS_CCNC(pt_bus)                                                                                                    \
   {.msg = {{0x1aa, (pt_bus), 16, 50U, .ignore_checksum = true, .max_counter = 0xffU, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
+  {.msg = {{0x10b, (pt_bus), 16, 25U, .ignore_checksum = true, .max_counter = 0U, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
 
 // SCC_CONTROL (from ADAS unit or camera)
 #define HYUNDAI_CANFD_SCC_ADDR_CHECK(scc_bus)                                                                            \
@@ -107,9 +114,13 @@ static void hyundai_canfd_rx_hook(const CANPacket_t *msg) {
       update_sample(&angle_meas, angle_meas_new);
     }
 
-    // cruise buttons
+    // cruise buttons.
+    // CCNC cars leave this message's button field at zero and report presses in 0x10B instead,
+    // so reading it here would feed hyundai_common_cruise_buttons_check() a permanent NONE.
+    // hyundai_last_button_interaction then saturates, controls_allowed never latches on the
+    // cruise-engaged rising edge, and every button we try to send is rejected.
     const unsigned int button_addr = hyundai_canfd_alt_buttons ? 0x1aaU : 0x1cfU;
-    if (msg->addr == button_addr) {
+    if ((msg->addr == button_addr) && !get_hyundai_ccnc()) {
       bool main_button = false;
       int cruise_button = 0;
       if (msg->addr == 0x1cfU) {
@@ -137,6 +148,18 @@ static void hyundai_canfd_rx_hook(const CANPacket_t *msg) {
     // controls_allowed_lateral and the mismatch check disengages with a takeover alert.
     if (get_hyundai_ccnc() && (msg->addr == 0x10BU)) {
       mads_button_press = GET_BIT(msg, 87U) ? MADS_BUTTON_PRESSED : MADS_BUTTON_NOT_PRESSED;
+
+      // The cruise buttons live here too, one bit each, rather than as an enum: bit 80 is +,
+      // bit 81 is -, bit 82 is resume. Measured on a 2026 Palisade Hybrid (LX3). + and resume
+      // are separate buttons on this car, unlike most Hyundais where RES_ACCEL is both.
+      int cruise_button = HYUNDAI_BTN_NONE;
+      if (GET_BIT(msg, 80U) || GET_BIT(msg, 82U)) {
+        cruise_button = HYUNDAI_BTN_RESUME;
+      } else if (GET_BIT(msg, 81U)) {
+        cruise_button = HYUNDAI_BTN_SET;
+      } else {
+      }
+      hyundai_common_cruise_buttons_check(cruise_button, false);
     }
 
     // gas press, different for EV, hybrid, and ICE models

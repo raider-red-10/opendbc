@@ -707,6 +707,40 @@ class TestHyundaiCanfdCcncAltButtonsTx(unittest.TestCase):
       with self.subTest(btn=btn):
         self.assertFalse(self._tx(self._button_msg(btn)))
 
+  def _lfa_button_rx(self, accel=0, decel=0, resume=0):
+    """The car's own button message, on the powertrain bus."""
+    values = {"ACCEL_BTN": accel, "DECEL_BTN": decel, "RESUME_BTN": resume}
+    return self.packer.make_can_msg_safety("LFA_BUTTON_ALT", self.PT_BUS, values)
+
+  def test_controls_allowed_latches_from_the_real_button_message(self):
+    """Engagement needs a recent user button press, and this car reports presses in 0x10b.
+    Reading 0x1aa fed the tracker a permanent NONE, so controls_allowed never latched and
+    every button we tried to send was rejected -- no frame content could have fixed that."""
+    self.safety.set_controls_allowed(0)
+    self._rx(self._pcm_status_msg(False))
+
+    self._rx(self._lfa_button_rx(accel=1))   # driver presses +
+    self._rx(self._lfa_button_rx())          # and releases
+    self._rx(self._pcm_status_msg(True))     # cruise engages on the rising edge
+    self.assertTrue(self.safety.get_controls_allowed())
+
+  def test_controls_allowed_does_not_latch_without_a_button_press(self):
+    # Saturate the interaction counter with idle frames, then engage
+    self.safety.set_controls_allowed(0)
+    self._rx(self._pcm_status_msg(False))
+    for _ in range(16):
+      self._rx(self._lfa_button_rx())
+    self._rx(self._pcm_status_msg(True))
+    self.assertFalse(self.safety.get_controls_allowed())
+
+  def test_decel_button_also_counts_as_interaction(self):
+    self.safety.set_controls_allowed(0)
+    self._rx(self._pcm_status_msg(False))
+    self._rx(self._lfa_button_rx(decel=1))
+    self._rx(self._lfa_button_rx())
+    self._rx(self._pcm_status_msg(True))
+    self.assertTrue(self.safety.get_controls_allowed())
+
   def _lfa_button_msg(self, accel=0, decel=0, resume=0, lfa=0):
     values = {"ACCEL_BTN": accel, "DECEL_BTN": decel, "RESUME_BTN": resume, "LFA_BTN": lfa}
     return self.packer.make_can_msg_safety("LFA_BUTTON_ALT", self.BUTTONS_TX_BUS, values)
