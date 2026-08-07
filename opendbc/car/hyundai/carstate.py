@@ -37,9 +37,11 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     self.cruise_buttons: deque = deque([Buttons.NONE] * PREV_BUTTON_SAMPLES, maxlen=PREV_BUTTON_SAMPLES)
     self.main_buttons: deque = deque([Buttons.NONE] * PREV_BUTTON_SAMPLES, maxlen=PREV_BUTTON_SAMPLES)
     self.lda_button = 0
-    # LX3 steering wheel buttons, all in LFA_BUTTON_ALT (0x10b) byte 10
+    # Cluster-button cars report the steering wheel buttons in LFA_BUTTON_ALT (0x10b) byte 10
     self.accel_button = self.decel_button = self.resume_button = 0
     self.other_button = 0
+    # Declared/auto-detected HDA1 traits -- see the trait flags design doc
+    self.btn_cluster_0x10b = bool(CP_SP.flags & HyundaiFlagsSP.BTN_CLUSTER_0X10B)
 
     self.gear_msg_canfd = "ACCELERATOR" if CP.flags & HyundaiFlags.EV else \
                           "GEAR_ALT" if CP.flags & HyundaiFlags.CANFD_ALT_GEARS else \
@@ -286,10 +288,10 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
 
     ret.brakePressed = cp.vl["TCS"]["DriverBraking"] == 1
 
-    # LX3 does not transmit DOORS_SEATBELTS (0x411). Reading it via cp.vl would register
-    # the message with the parser, and a registered message that never arrives fails
-    # state.valid() -> can_valid false -> canError.
-    if self.CP.carFingerprint != CAR.HYUNDAI_PALISADE_HEV_LX3:
+    # Some HDA1 cars do not transmit DOORS_SEATBELTS (0x411) -- auto-detected from the
+    # fingerprint. Reading it via cp.vl would register the message with the parser, and a
+    # registered message that never arrives fails state.valid() -> can_valid false -> canError.
+    if not self.CP_SP.flags & HyundaiFlagsSP.ABSENT_DOORS_MSG:
       ret.doorOpen = cp.vl["DOORS_SEATBELTS"]["DRIVER_DOOR"] == 1
       ret.seatbeltUnlatched = cp.vl["DOORS_SEATBELTS"]["DRIVER_SEATBELT"] == 0
 
@@ -313,8 +315,9 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     ret.steerFaultTemporary = cp.vl["MDPS"]["MDPS_LkaFailSta"] != 0
     if self.is_canfd_angle_steering:
       ret.steerFaultTemporary = ret.steerFaultTemporary or cp.vl["MDPS"]["MDPS_ADAS_AciFltSig_Lv2"] != 0
-      # LX3 does not transmit HOD_FD_01_100ms (0x2af) -- see DOORS_SEATBELTS note above
-      if self.CP.carFingerprint != CAR.HYUNDAI_PALISADE_HEV_LX3:
+      # Some HDA1 cars do not transmit HOD_FD_01_100ms (0x2af) -- auto-detected, see the
+      # DOORS_SEATBELTS note above
+      if not self.CP_SP.flags & HyundaiFlagsSP.ABSENT_HOD_MSG:
         self.hands_on_steering_grip = cp.vl["HOD_FD_01_100ms"]["HOD_Dir_Status"]
       torque_overriding = abs(ret.steeringTorque) > self.params.STEER_THRESHOLD
       ret.steeringPressed = self.update_steering_pressed(torque_overriding, 5)
@@ -333,16 +336,16 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     left_blinker_sig, right_blinker_sig = "LEFT_LAMP", "RIGHT_LAMP"
     if self.CP.carFingerprint == CAR.HYUNDAI_KONA_EV_2ND_GEN or self.is_canfd_angle_steering:
       left_blinker_sig, right_blinker_sig = "LEFT_LAMP_ALT", "RIGHT_LAMP_ALT"
-    # LX3 does not transmit BLINKERS (0x413). The lamps are in BLINKERS_ALT (0x3e3) byte 11:
-    # bit 2 left, bit 4 right -- the same two-bits-apart layout BLINKERS uses. Measured on a
-    # 2026 Palisade Hybrid: each bit flashes at 1.32Hz for its own stalk and stays static for
-    # the other.
+    # Some HDA1 cars do not transmit BLINKERS (0x413) -- auto-detected from the fingerprint.
+    # The lamps are in BLINKERS_ALT (0x3e3) byte 11: bit 2 left, bit 4 right -- the same
+    # two-bits-apart layout BLINKERS uses. Measured on a 2026 Palisade Hybrid: each bit
+    # flashes at 1.32Hz for its own stalk and stays static for the other.
     #
     # The hold is longer than the usual 50 because 0x3e3 arrives at 5Hz, not 50Hz. Sampling a
     # 379ms lamp pulse every 196ms leaves up to 588ms (59 frames) between two frames that
     # catch the lamp lit, so a 50 frame hold would drop the blinker between flashes and
     # cancel a lane change mid-manoeuvre.
-    if self.CP.carFingerprint == CAR.HYUNDAI_PALISADE_HEV_LX3:
+    if self.CP_SP.flags & HyundaiFlagsSP.BLINKERS_ALT:
       ret.leftBlinker, ret.rightBlinker = self.update_blinker_from_lamp(100, cp.vl["BLINKERS_ALT"]["LEFT_LAMP"],
                                                                         cp.vl["BLINKERS_ALT"]["RIGHT_LAMP"])
     else:
@@ -382,19 +385,18 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     prev_cruise_buttons = self.cruise_buttons[-1]
     prev_main_buttons = self.main_buttons[-1]
     prev_lda_button = self.lda_button
-    is_lx3 = self.CP.carFingerprint == CAR.HYUNDAI_PALISADE_HEV_LX3
-    if not is_lx3:
-      # LX3: 0x1aa's button field is always zero; the deque is fed from 0x10b in
-      # _update_lx3_buttons instead, or the interaction window would read permanently empty
+    if not self.btn_cluster_0x10b:
+      # Cluster-button cars: 0x1aa's button field is always zero; the deque is fed from 0x10b
+      # in _update_lx3_buttons instead, or the interaction window would read permanently empty
       self.cruise_buttons.extend(cp.vl_all[self.cruise_btns_msg_canfd]["CRUISE_BUTTONS"])
     self.main_buttons.extend(cp.vl_all[self.cruise_btns_msg_canfd]["ADAPTIVE_CRUISE_MAIN_BTN"])
-    # LX3 does not report the LFA button in CRUISE_BUTTONS_ALT. It lives in LFA_BUTTON_ALT
-    # (0x10b) byte 10 bit 7, measured on the vehicle: 5 presses produced exactly 5 rising
-    # edges matching the press cadence, and SET-/RES+/gap produced zero. MADS toggles on
-    # ButtonType.lkas, and allow_always is set for CAN-FD Hyundais, so this engages and
-    # disengages lateral independently of cruise.
+    # Cluster-button cars do not report the LFA button in CRUISE_BUTTONS_ALT. It lives in
+    # LFA_BUTTON_ALT (0x10b) byte 10 bit 7, measured on the vehicle: 5 presses produced
+    # exactly 5 rising edges matching the press cadence, and SET-/RES+/gap produced zero.
+    # MADS toggles on ButtonType.lkas, and allow_always is set for CAN-FD Hyundais, so this
+    # engages and disengages lateral independently of cruise.
     lx3_button_events = []
-    if is_lx3:
+    if self.btn_cluster_0x10b:
       lx3_button_events = self._update_lx3_buttons(cp.vl["LFA_BUTTON_ALT"])
     else:
       self.lda_button = cp.vl[self.cruise_btns_msg_canfd]["LDA_BTN"]
@@ -409,9 +411,9 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
 
     MadsCarState.update_mads_canfd(self, ret, can_parsers)
 
-    # LX3: cruise-button events come from _update_lx3_buttons -- generating them from the
-    # deque too would double every press
-    button_events = [*(create_button_events(self.cruise_buttons[-1], prev_cruise_buttons, BUTTONS_DICT) if not is_lx3 else []),
+    # Cluster-button cars: cruise-button events come from _update_lx3_buttons -- generating
+    # them from the deque too would double every press
+    button_events = [*(create_button_events(self.cruise_buttons[-1], prev_cruise_buttons, BUTTONS_DICT) if not self.btn_cluster_0x10b else []),
                      *create_button_events(self.main_buttons[-1], prev_main_buttons, {1: ButtonType.mainCruise}),
                      *create_button_events(self.lda_button, prev_lda_button, {1: ButtonType.lkas}),
                      *lx3_button_events]
@@ -427,12 +429,12 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
 
     return ret, ret_sp
 
-  def get_can_parsers_canfd(self, CP):
+  def get_can_parsers_canfd(self, CP, CP_SP):
     msgs = []
     if not (CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS):
-      # LX3 transmits CRUISE_BUTTONS at <1Hz (gaps >1s), so the frequency check
-      # would fault. Buttons are still read via cruise_btns_msg_canfd.
-      if CP.carFingerprint != CAR.HYUNDAI_PALISADE_HEV_LX3:
+      # Cluster-button cars transmit CRUISE_BUTTONS (0x1cf) at <1Hz (gaps >1s, measured), so
+      # the frequency check would fault. Their buttons come from 0x10b anyway.
+      if not CP_SP.flags & HyundaiFlagsSP.BTN_CLUSTER_0X10B:
         # TODO: this can be removed once we add dynamic support to vl_all
         msgs += [
           # this message is 50Hz but the ECU frequently stops transmitting for ~0.5s
@@ -475,7 +477,7 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
 
   def get_can_parsers(self, CP, CP_SP):
     if CP.flags & HyundaiFlags.CANFD:
-      return self.get_can_parsers_canfd(CP)
+      return self.get_can_parsers_canfd(CP, CP_SP)
 
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], 0),

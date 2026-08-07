@@ -7,6 +7,7 @@ from opendbc.car.hyundai.fingerprints import FW_VERSIONS
 from opendbc.car.hyundai.interface import CarInterface
 from opendbc.car.hyundai.values import DBC, CAR
 from opendbc.car.structs import CarParams
+from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
@@ -74,8 +75,14 @@ class TestLx3ButtonInteraction(unittest.TestCase):
     fp = gen_empty_fingerprint()
     fp[2][0xCB] = 24
     CP = CarInterface.get_params(c, fp, fw, False, True, False)
-    self.CS = CarState(CP, structs.CarParamsSP())
+    self.CP_SP = CarInterface.get_params_sp(CP, c, fp, fw, False, True, False)
+    self.CS = CarState(CP, self.CP_SP)
     self.counter = 0
+
+  def test_trait_gates_on_the_flag_not_the_platform(self):
+    self.assertTrue(self.CS.btn_cluster_0x10b)
+    self.CP_SP.flags &= ~HyundaiFlagsSP.BTN_CLUSTER_0X10B.value
+    self.assertFalse(CarState(self.CS.CP, self.CP_SP).btn_cluster_0x10b)
 
   def btns(self, byte10=0, fresh=True):
     if fresh:
