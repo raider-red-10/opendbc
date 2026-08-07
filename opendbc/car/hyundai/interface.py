@@ -219,6 +219,16 @@ class CarInterface(CarInterfaceBase):
       speed_limit_bus = CAN.ECAN if lka_steering else CAN.CAM
       if 0x1fa in fingerprint[speed_limit_bus]:
         ret.flags |= HyundaiFlagsSP.SPEED_LIMIT_AVAILABLE.value
+
+      # Bus-detectable HDA1 traits configure themselves -- see the trait flags design doc.
+      # A registered message that never arrives fails can_valid, so absences must gate
+      # parser registration downstream in carstate.
+      if 0x413 not in fingerprint[CAN.ECAN] and 0x3E3 in fingerprint[CAN.ECAN]:
+        ret.flags |= HyundaiFlagsSP.BLINKERS_ALT.value
+      if 0x411 not in fingerprint[CAN.ECAN]:
+        ret.flags |= HyundaiFlagsSP.ABSENT_DOORS_MSG.value
+      if 0x2AF not in fingerprint[CAN.ECAN]:
+        ret.flags |= HyundaiFlagsSP.ABSENT_HOD_MSG.value
     else:
       # Detect smartMDPS, which bypasses EPS low-speed lockout, allowing sunnypilot to send steering commands down to 0
       if 0x2AA in fingerprint[0]:
@@ -230,6 +240,13 @@ class CarInterface(CarInterfaceBase):
 
       if 0x53E in fingerprint[2]:
         ret.flags |= HyundaiFlagsSP.HAS_LKAS12.value
+
+    # Content-defined trait, declared per measured platform: the buttons live in
+    # LFA_BUTTON_ALT (0x10b) byte 10 and 0x1aa's button field is permanently zero.
+    if candidate in (CAR.HYUNDAI_PALISADE_HEV_LX3,):
+      ret.flags |= HyundaiFlagsSP.BTN_CLUSTER_0X10B.value
+    if ret.flags & HyundaiFlagsSP.BTN_CLUSTER_0X10B:
+      ret.safetyParam |= HyundaiSafetyFlagsSP.BTN_CLUSTER_0X10B
 
     # ICBM works by pressing SET+/SET- for the driver. CANFD_ALT_BUTTONS cars carry the buttons in
     # CRUISE_BUTTONS_ALT (0x1aa), which is only in the panda TX list for the CCNC camera-SCC config
