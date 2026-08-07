@@ -54,15 +54,20 @@
   {.msg = {{0xa0, (pt_bus), 24, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
   {.msg = {{0xea, (pt_bus), 24, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
 
-// LFA_BUTTON_ALT (0x10b) carries this car's real buttons -- cruise and LFA both. The rx hook
-// only runs for addresses in this list, so without it panda never saw a button at all:
-// hyundai_last_button_interaction saturated, controls_allowed never latched on the
-// cruise-engaged rising edge, and every button openpilot tried to send was rejected.
-// 25Hz measured on the vehicle. Its counter steps by 2, which the +1 counter check can never
-// satisfy -- same quirk as 0x105 above, so skip that check; checksum and frequency still apply.
 #define HYUNDAI_CANFD_ALT_BUTTONS_RX_CHECKS_CCNC(pt_bus)                                                                                         \
   HYUNDAI_CANFD_COMMON_RX_CHECKS_CCNC(pt_bus)                                                                                                    \
   {.msg = {{0x1aa, (pt_bus), 16, 50U, .ignore_checksum = true, .max_counter = 0xffU, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
+
+// LFA_BUTTON_ALT (0x10b) carries the real buttons on cluster-button cars (declared trait) --
+// cruise and LFA both. The rx hook only runs for addresses in this list, so without it panda
+// never saw a button at all: hyundai_last_button_interaction saturated, controls_allowed
+// never latched on the cruise-engaged rising edge, and every button openpilot tried to send
+// was rejected. 25Hz measured on the vehicle. Its counter steps by 2, which the +1 counter
+// check can never satisfy -- same quirk as 0x105 above, so skip that check. Only declared on
+// trait cars: a checked address the car never transmits would invalidate the rx checks and
+// clear controls_allowed continuously.
+#define HYUNDAI_CANFD_ALT_BUTTONS_RX_CHECKS_CCNC_BTN_CLUSTER(pt_bus)                                                                             \
+  HYUNDAI_CANFD_ALT_BUTTONS_RX_CHECKS_CCNC(pt_bus)                                                                                               \
   {.msg = {{0x10b, (pt_bus), 16, 25U, .ignore_checksum = true, .max_counter = 0U, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
 
 // SCC_CONTROL (from ADAS unit or camera)
@@ -115,12 +120,13 @@ static void hyundai_canfd_rx_hook(const CANPacket_t *msg) {
     }
 
     // cruise buttons.
-    // CCNC cars leave this message's button field at zero and report presses in 0x10B instead,
-    // so reading it here would feed hyundai_common_cruise_buttons_check() a permanent NONE.
-    // hyundai_last_button_interaction then saturates, controls_allowed never latches on the
-    // cruise-engaged rising edge, and every button we try to send is rejected.
+    // Cluster-button cars (declared trait) leave this message's button field at zero and
+    // report presses in 0x10B instead, so reading it here would feed
+    // hyundai_common_cruise_buttons_check() a permanent NONE. hyundai_last_button_interaction
+    // then saturates, controls_allowed never latches on the cruise-engaged rising edge, and
+    // every button we try to send is rejected.
     const unsigned int button_addr = hyundai_canfd_alt_buttons ? 0x1aaU : 0x1cfU;
-    if ((msg->addr == button_addr) && !get_hyundai_ccnc()) {
+    if ((msg->addr == button_addr) && !hyundai_btn_cluster_0x10b) {
       bool main_button = false;
       int cruise_button = 0;
       if (msg->addr == 0x1cfU) {
@@ -130,23 +136,21 @@ static void hyundai_canfd_rx_hook(const CANPacket_t *msg) {
       } else {
         cruise_button = (msg->data[4] >> 4) & 0x7U;
         main_button = GET_BIT(msg, 34U);
-        // CCNC cars do not report the LFA button here -- see 0x10B below. This message
-        // arrives at 50Hz, so leaving this in place would continuously overwrite the
+        // Cluster-button cars report the LFA button in 0x10B instead and never reach this
+        // branch (gated above) -- reading it here at 50Hz would continuously overwrite the
         // real button state with NOT_PRESSED.
-        if (!get_hyundai_ccnc()) {
-          mads_button_press = GET_BIT(msg, 39U) ? MADS_BUTTON_PRESSED : MADS_BUTTON_NOT_PRESSED;
-        }
+        mads_button_press = GET_BIT(msg, 39U) ? MADS_BUTTON_PRESSED : MADS_BUTTON_NOT_PRESSED;
       }
       hyundai_common_cruise_buttons_check(cruise_button, main_button);
     }
 
-    // CCNC cars carry the LFA button in its own message rather than with the cruise
-    // buttons. Measured on a 2026 Palisade Hybrid (LX3): 0x10B byte 10 bit 7, five
+    // Cluster-button cars carry the LFA button in its own message rather than with the
+    // cruise buttons. Measured on a 2026 Palisade Hybrid (LX3): 0x10B byte 10 bit 7, five
     // presses produced five rising edges matching the press cadence, and SET-/RES+/gap
     // produced none. Must match the carstate read of LFA_BUTTON_ALT -- if the two
     // layers disagree, openpilot engages lateral while the panda withholds
     // controls_allowed_lateral and the mismatch check disengages with a takeover alert.
-    if (get_hyundai_ccnc() && (msg->addr == 0x10BU)) {
+    if (hyundai_btn_cluster_0x10b && (msg->addr == 0x10BU)) {
       mads_button_press = GET_BIT(msg, 87U) ? MADS_BUTTON_PRESSED : MADS_BUTTON_NOT_PRESSED;
 
       // The cruise buttons live here too, one bit each, rather than as an enum: bit 80 is +,
@@ -315,16 +319,16 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
     }
   }
 
-  // LFA_BUTTON_ALT carries one bit per button in byte 10 rather than a button enum, and is the
-  // only message the LX3 reads presses from. Accel and decel adjust the set speed, so they need
-  // controls_allowed; resume and the LFA button are never ours to send.
+  // LFA_BUTTON_ALT carries one bit per button in byte 10 rather than a button enum, and is
+  // the only message cluster-button cars read presses from. Accel and decel adjust the set
+  // speed, so they need controls_allowed; resume and the LFA button are never ours to send.
   if (msg->addr == 0x10BU) {
     bool accel = GET_BIT(msg, 80U);
     bool decel = GET_BIT(msg, 81U);
     bool resume = GET_BIT(msg, 82U);
     bool lfa = GET_BIT(msg, 87U);
     bool one_button = (accel != decel);  // exactly one of the two, never both
-    if (!hyundai_canfd_alt_buttons || resume || lfa || !one_button || !controls_allowed) {
+    if (!hyundai_canfd_alt_buttons || !hyundai_btn_cluster_0x10b || resume || lfa || !one_button || !controls_allowed) {
       tx = false;
     }
   }
@@ -561,6 +565,11 @@ static safety_config hyundai_canfd_init(uint16_t param) {
         HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
       };
 
+      static RxCheck hyundai_canfd_alt_buttons_ccnc_btn_cluster_rx_checks[] = {
+        HYUNDAI_CANFD_ALT_BUTTONS_RX_CHECKS_CCNC_BTN_CLUSTER(0)
+        HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
+      };
+
       static CanMsg hyundai_canfd_lfa_steering_camera_scc_tx_msgs[] = {
         HYUNDAI_CANFD_LFA_STEERING_CAMERA_SCC_TX_MSGS(false)
       };
@@ -576,7 +585,9 @@ static safety_config hyundai_canfd_init(uint16_t param) {
       }
 
       if (hyundai_canfd_alt_buttons) {
-        if (get_hyundai_ccnc()) {
+        if (get_hyundai_ccnc() && hyundai_btn_cluster_0x10b) {
+          SET_RX_CHECKS(hyundai_canfd_alt_buttons_ccnc_btn_cluster_rx_checks, ret);
+        } else if (get_hyundai_ccnc()) {
           SET_RX_CHECKS(hyundai_canfd_alt_buttons_ccnc_rx_checks, ret);
         } else {
           SET_RX_CHECKS(hyundai_canfd_alt_buttons_rx_checks, ret);

@@ -22,6 +22,7 @@ enum {
   HYUNDAI_PARAM_SP_LONGITUDINAL_MAIN_CRUISE_TOGGLEABLE = 2,
   HYUNDAI_PARAM_SP_HAS_LDA_BUTTON = 4,
   HYUNDAI_PARAM_SP_NON_SCC = 8,
+  HYUNDAI_PARAM_SP_BTN_CLUSTER_0X10B = 16,
 };
 
 // common state
@@ -62,6 +63,12 @@ bool hyundai_has_lda_button = false;
 extern bool hyundai_non_scc;
 bool hyundai_non_scc = false;
 
+// Declared per platform: the whole steering-wheel cluster is in LFA_BUTTON_ALT (0x10b)
+// byte 10 and 0x1aa's button field is permanently zero. Keep in sync with
+// HyundaiSafetyFlagsSP.BTN_CLUSTER_0X10B on the openpilot side.
+extern bool hyundai_btn_cluster_0x10b;
+bool hyundai_btn_cluster_0x10b = false;
+
 static uint8_t hyundai_last_button_interaction;  // button messages since the user pressed an enable button
 
 static bool main_button_prev;
@@ -90,6 +97,7 @@ void hyundai_common_init(uint16_t param) {
   hyundai_longitudinal_main_cruise_toggleable = GET_FLAG(current_safety_param_sp, HYUNDAI_PARAM_SP_LONGITUDINAL_MAIN_CRUISE_TOGGLEABLE);
   hyundai_has_lda_button = GET_FLAG(current_safety_param_sp, HYUNDAI_PARAM_SP_HAS_LDA_BUTTON);
   hyundai_non_scc = GET_FLAG(current_safety_param_sp, HYUNDAI_PARAM_SP_NON_SCC);
+  hyundai_btn_cluster_0x10b = GET_FLAG(current_safety_param_sp, HYUNDAI_PARAM_SP_BTN_CLUSTER_0X10B);
 
   hyundai_last_button_interaction = HYUNDAI_PREV_BUTTON_SAMPLES;
 

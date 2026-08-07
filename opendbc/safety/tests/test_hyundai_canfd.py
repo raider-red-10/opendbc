@@ -11,6 +11,7 @@ from opendbc.safety.tests.libsafety import libsafety_py
 import opendbc.safety.tests.common as common
 from opendbc.safety.tests.common import CANPackerSafety, away_round, round_speed
 from opendbc.safety.tests.hyundai_common import Buttons, HyundaiButtonBase, HyundaiLongitudinalBase
+from opendbc.sunnypilot.car.hyundai.values import HyundaiSafetyFlagsSP
 from opendbc.car.lateral import get_max_angle_delta_vm, get_max_angle_vm, AngleSteeringLimitsVM
 from opendbc.car.hyundai.interface import CarInterface
 
@@ -666,8 +667,13 @@ class TestHyundaiCanfdCcncAltButtonsTx(unittest.TestCase):
   def setUp(self):
     self.packer = CANPackerSafety("hyundai_canfd_generated")
     self.safety = libsafety_py.libsafety
+    # The button cluster is a declared trait, not implied by CCNC -- see the trait flags design
+    self.safety.set_current_safety_param_sp(HyundaiSafetyFlagsSP.BTN_CLUSTER_0X10B)
     self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfd, self.CCNC_PARAM)
     self.safety.init_tests()
+
+  def tearDown(self):
+    self.safety.set_current_safety_param_sp(0)
 
   def _tx(self, msg):
     return self.safety.safety_tx_hook(msg)
@@ -818,6 +824,54 @@ class TestHyundaiCanfdCcncAltButtonsTx(unittest.TestCase):
     for btn in (Buttons.RESUME, Buttons.SET):
       with self.subTest(btn=btn):
         self.assertFalse(self._tx(self._button_msg(btn)))
+
+
+class TestHyundaiCanfdCcncWithoutBtnCluster(unittest.TestCase):
+  """CCNC describes the cluster, not the buttons. A CCNC car without the BTN_CLUSTER_0X10B
+  safety bit must keep stock alt-buttons behavior: the buttons (and the controls_allowed
+  latch) come from 0x1aa, and 0x10b is neither read nor transmittable. When this was gated on
+  CCNC alone, every torque CCNC car would have lost its latch."""
+
+  PT_BUS = 0
+  SCC_BUS = 2
+  CCNC_PARAM = (HyundaiSafetyFlags.CCNC | HyundaiSafetyFlags.CANFD_ALT_BUTTONS |
+                HyundaiSafetyFlags.CAMERA_SCC | HyundaiSafetyFlags.CANFD_ANGLE_STEERING |
+                HyundaiSafetyFlags.HYBRID_GAS)
+
+  def setUp(self):
+    self.packer = CANPackerSafety("hyundai_canfd_generated")
+    self.safety = libsafety_py.libsafety
+    self.safety.set_current_safety_param_sp(0)
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfd, self.CCNC_PARAM)
+    self.safety.init_tests()
+
+  def _rx(self, msg):
+    return self.safety.safety_rx_hook(msg)
+
+  def _pcm_status_msg(self, enable):
+    values = {"ACCMode": 1 if enable else 0}
+    return self.packer.make_can_msg_safety("SCC_CONTROL", self.SCC_BUS, values)
+
+  def test_alt_buttons_latch_controls(self):
+    # stock behavior restored: 0x1aa carries the buttons and arms the latch
+    self.safety.set_controls_allowed(0)
+    self._rx(self._pcm_status_msg(False))
+    self._rx(self.packer.make_can_msg_safety("CRUISE_BUTTONS_ALT", self.PT_BUS,
+                                             {"CRUISE_BUTTONS": Buttons.SET}))
+    self._rx(self._pcm_status_msg(True))
+    self.assertTrue(self.safety.get_controls_allowed())
+
+  def test_10b_buttons_do_not_latch(self):
+    self.safety.set_controls_allowed(0)
+    self._rx(self._pcm_status_msg(False))
+    self._rx(self.packer.make_can_msg_safety("LFA_BUTTON_ALT", self.PT_BUS, {"DECEL_BTN": 1}))
+    self._rx(self._pcm_status_msg(True))
+    self.assertFalse(self.safety.get_controls_allowed())
+
+  def test_10b_tx_rejected_even_with_controls(self):
+    self.safety.set_controls_allowed(1)
+    msg = self.packer.make_can_msg_safety("LFA_BUTTON_ALT", 2, {"ACCEL_BTN": 1})
+    self.assertFalse(self.safety.safety_tx_hook(msg))
 
 
 if __name__ == "__main__":
