@@ -51,8 +51,11 @@ class TestMisraMutation(unittest.TestCase):
     for fn, rule, transform, should_fail in mutations:
       with self.subTest(fn=fn, rule=rule, should_fail=should_fail):
         with tempfile.TemporaryDirectory() as tmp:
+          # '*.tmp' excludes transient libsafety build artifacts: under pytest-xdist, other
+          # workers compile concurrently and their atomic-rename temp files vanish between
+          # copytree's enumeration and copy, failing the whole subtest.
           shutil.copytree(ROOT, tmp, dirs_exist_ok=True,
-                          ignore=shutil.ignore_patterns('.venv', '.git', '*.ctu-info', '.hypothesis'))
+                          ignore=shutil.ignore_patterns('.venv', '.git', '*.ctu-info', '.hypothesis', '*.tmp'))
 
           # apply patch
           if fn is not None:
