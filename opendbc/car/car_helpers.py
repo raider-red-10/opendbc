@@ -93,8 +93,21 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
 
   start_time = time.monotonic()
   if not skip_fw_query:
-    if cached_params is not None and cached_params.brand != "mock" and len(cached_params.carFw) > 0 and \
-       (cached_params.carVin != VIN_UNKNOWN or os.environ.get("REPLAY")) and not disable_fw_cache:
+    use_cached = cached_params is not None and cached_params.brand != "mock" and len(cached_params.carFw) > 0 and \
+       (cached_params.carVin != VIN_UNKNOWN or os.environ.get("REPLAY")) and not disable_fw_cache
+    live_vin_result = None
+    if use_cached and not os.environ.get("REPLAY"):
+      # The cache does not know which car it is plugged into: a device moved between cars
+      # would resolve the previous car's CarParams -- wrong steering mode, wrong safety
+      # config. A live VIN read decides whether the cache describes this car; an
+      # unverifiable VIN costs a re-fingerprint, never a wrong car.
+      set_obd_multiplexing(True)
+      live_vin_result = get_vin(can_recv, can_send, (0, 1))
+      if live_vin_result[2] != cached_params.carVin:
+        carlog.warning("Cached CarParams VIN mismatch -- device moved to a different car, re-fingerprinting")
+        use_cached = False
+
+    if use_cached:
       carlog.warning("Using cached CarParams")
       vin_rx_addr, vin_rx_bus, vin = -1, -1, cached_params.carVin
       car_fw = list(cached_params.carFw)
@@ -104,8 +117,8 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
       # enable OBD multiplexing for VIN query
       # NOTE: this takes ~0.1s and is relied on to allow sendcan subscriber to connect in time
       set_obd_multiplexing(True)
-      # VIN query only reliably works through OBDII
-      vin_rx_addr, vin_rx_bus, vin = get_vin(can_recv, can_send, (0, 1))
+      # VIN query only reliably works through OBDII; reuse the validation read if it ran
+      vin_rx_addr, vin_rx_bus, vin = live_vin_result if live_vin_result is not None else get_vin(can_recv, can_send, (0, 1))
       ecu_rx_addrs = get_present_ecus(can_recv, can_send, set_obd_multiplexing)
       car_fw = get_fw_versions_ordered(can_recv, can_send, set_obd_multiplexing, vin, ecu_rx_addrs)
       cached = False
