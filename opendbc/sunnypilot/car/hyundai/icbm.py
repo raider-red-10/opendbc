@@ -9,7 +9,8 @@ import numpy as np
 from opendbc.car import DT_CTRL, structs
 from opendbc.car.can_definitions import CanData
 from opendbc.car.hyundai import hyundaican, hyundaicanfd
-from opendbc.car.hyundai.values import CAR, HyundaiFlags, Buttons, CANFD_CAR
+from opendbc.car.hyundai.values import HyundaiFlags, Buttons, CANFD_CAR
+from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP
 from opendbc.sunnypilot.car.intelligent_cruise_button_management_interface_base import IntelligentCruiseButtonManagementInterfaceBase
 
 ButtonType = structs.CarState.ButtonEvent.Type
@@ -124,7 +125,7 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
     self.frame = frame
     self.last_button_frame = last_button_frame
 
-    if self.CP.carFingerprint == CAR.HYUNDAI_PALISADE_HEV_LX3:
+    if self.CP_SP.flags & HyundaiFlagsSP.BTN_CLUSTER_0X10B:
       # None while no press is requested; an in-flight press still drains to completion
       send_button = BUTTONS.get(self.ICBM.sendButton)
       can_sends.extend(self.create_lx3_press_messages(packer, CS, CAN, send_button))

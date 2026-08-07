@@ -31,7 +31,8 @@ class TestLx3PressCadence(unittest.TestCase):
     fp = gen_empty_fingerprint()
     fp[2][0xCB] = 24
     self.CP = CarInterface.get_params(c, fp, fw, False, True, False)
-    self.icbm = IntelligentCruiseButtonManagementInterface(self.CP, structs.CarParamsSP())
+    self.CP_SP = CarInterface.get_params_sp(self.CP, c, fp, fw, False, True, False)
+    self.icbm = IntelligentCruiseButtonManagementInterface(self.CP, self.CP_SP)
     self.icbm.last_button_frame = -1000  # no press earlier in the drive
     self.packer = CANPacker(DBC[c][Bus.pt])
     self.CAN = CanBus(self.CP)
@@ -40,6 +41,7 @@ class TestLx3PressCadence(unittest.TestCase):
       lfa_btn_info={"CHECKSUM": 0, "COUNTER_ALT": self.counter, "ACCEL_BTN": 0,
                     "DECEL_BTN": 0, "RESUME_BTN": 0, "LFA_BTN": 0},
       lfa_btn_counter=self.counter,
+      cruise_btns_alt_info={},  # stock alt-buttons path: no 0x1aa frame captured yet
       is_metric=False)
 
   def run_ticks(self, ticks, send_button=SendButtonState.increase, stop_after=None):
@@ -96,6 +98,11 @@ class TestLx3PressCadence(unittest.TestCase):
 
   def test_nothing_sent_before_a_genuine_frame_is_seen(self):
     self.CS.lfa_btn_info = {}
+    self.assertEqual(self.run_ticks(20), [])
+
+  def test_no_press_path_without_the_trait(self):
+    from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP
+    self.icbm.CP_SP.flags &= ~HyundaiFlagsSP.BTN_CLUSTER_0X10B.value
     self.assertEqual(self.run_ticks(20), [])
 
   def test_frames_carry_the_requested_button_on_the_camera_bus(self):
