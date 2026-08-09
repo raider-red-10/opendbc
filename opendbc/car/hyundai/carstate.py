@@ -334,7 +334,13 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
 
     # TODO: alt signal usage may be described by cp.vl['BLINKERS']['USE_ALT_LAMP']
     left_blinker_sig, right_blinker_sig = "LEFT_LAMP", "RIGHT_LAMP"
-    if self.CP.carFingerprint == CAR.HYUNDAI_KONA_EV_2ND_GEN or self.is_canfd_angle_steering:
+    # CCNC is the union of two conditions that were developed separately: this branch (and
+    # upstream) selected the ALT lamps by fingerprint/angle-steering, while the CCNC port
+    # selected them by the CCNC flag. Neither set contains the other -- CCNC cars that are not
+    # angle-steering need ALT too, and angle-steering cars that are not CCNC still need it --
+    # so take both, or one group silently reads the wrong signal.
+    if self.CP.carFingerprint == CAR.HYUNDAI_KONA_EV_2ND_GEN or self.is_canfd_angle_steering or \
+       self.CP.flags & HyundaiFlags.CCNC:
       left_blinker_sig, right_blinker_sig = "LEFT_LAMP_ALT", "RIGHT_LAMP_ALT"
     # Some HDA1 cars do not transmit BLINKERS (0x413) -- auto-detected from the fingerprint.
     # The lamps are in BLINKERS_ALT (0x3e3) byte 11: bit 2 left, bit 4 right -- the same
