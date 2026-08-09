@@ -21,6 +21,10 @@ Ecu = CarParams.Ecu
 # For now, assert list of expected missing date cars
 NO_DATES_PLATFORMS = {
   # CAN FD
+  CAR.HYUNDAI_TUCSON_HEV_2025,
+  CAR.HYUNDAI_TUCSON_2025,
+  CAR.HYUNDAI_SANTA_CRUZ_2025,
+  CAR.KIA_SPORTAGE_2026,
   CAR.KIA_SPORTAGE_5TH_GEN,
   CAR.KIA_SPORTAGE_HEV_2026, # no date on camera
   CAR.HYUNDAI_SANTA_CRUZ_1ST_GEN,
@@ -191,7 +195,7 @@ class TestHyundaiFingerprint(unittest.TestCase):
           else:
             assert all(date is not None for _, date in codes)
 
-          if car_model in (CAR.HYUNDAI_GENESIS, CAR.KIA_SPORTAGE_HEV_2026, CAR.HYUNDAI_PALISADE_HEV_LX3):
+          if car_model in (CAR.HYUNDAI_GENESIS, CAR.KIA_SPORTAGE_2026, CAR.KIA_SPORTAGE_HEV_2026, CAR.HYUNDAI_PALISADE_HEV_LX3):
             raise unittest.SkipTest("No part numbers for car model")
 
           # Hyundai places the ECU part number in their FW versions, assert all parsable
