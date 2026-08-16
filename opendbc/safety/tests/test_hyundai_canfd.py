@@ -876,3 +876,41 @@ class TestHyundaiCanfdCcncWithoutBtnCluster(unittest.TestCase):
 
 if __name__ == "__main__":
   unittest.main()
+
+
+class TestHyundaiCanfdCcncLongitudinal(unittest.TestCase):
+  """Turning on openpilot longitudinal must not drop the CCNC accommodations. The longitudinal
+  branch selected the standard RX checks regardless of CCNC, so on a CCNC car ACCELERATOR_ALT's
+  +2 counter could never satisfy the +1 check -- is_msg_valid() fails continuously and clears
+  controls_allowed -- and 0x10b was not checked at all, so the rx hook never ran for it and the
+  button cluster (cruise buttons and the MADS button) went unread."""
+
+  PT_BUS = 0
+  PARAM = (HyundaiSafetyFlags.CCNC | HyundaiSafetyFlags.CANFD_ALT_BUTTONS |
+           HyundaiSafetyFlags.CAMERA_SCC | HyundaiSafetyFlags.CANFD_ANGLE_STEERING |
+           HyundaiSafetyFlags.HYBRID_GAS | HyundaiSafetyFlags.LONG)
+
+  def setUp(self):
+    self.packer = CANPackerSafety("hyundai_canfd_generated")
+    self.safety = libsafety_py.libsafety
+    self.safety.set_current_safety_param_sp(HyundaiSafetyFlagsSP.BTN_CLUSTER_0X10B)
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfd, self.PARAM)
+    self.safety.init_tests()
+
+  def tearDown(self):
+    self.safety.set_current_safety_param_sp(0)
+
+  def test_accelerator_alt_counter_stepping_by_two_stays_valid(self):
+    # Measured on the vehicle: 0x105's counter advances by 2 per frame on CCNC cars
+    for i in range(1, 11):
+      msg = self.packer.make_can_msg_safety("ACCELERATOR_ALT", self.PT_BUS, {"COUNTER": (2 * i) % 256})
+      self.assertTrue(self.safety.safety_rx_hook(msg), f"frame {i} rejected -- counter check not skipped")
+
+  def test_button_cluster_is_rx_checked(self):
+    # The rx hook only runs for whitelisted addresses. In longitudinal mode controls_allowed
+    # latches on the falling edge of SET, so a press/release proves the 0x10b branch ran.
+    self.safety.set_controls_allowed(0)
+    for pressed in (1, 0):
+      self.safety.safety_rx_hook(self.packer.make_can_msg_safety("LFA_BUTTON_ALT", self.PT_BUS,
+                                                                 {"DECEL_BTN": pressed}))
+    self.assertTrue(self.safety.get_controls_allowed(), "0x10b not checked, so its rx branch never ran")

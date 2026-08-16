@@ -484,6 +484,18 @@ static safety_config hyundai_canfd_init(uint16_t param) {
         HYUNDAI_CANFD_ALT_BUTTONS_RX_CHECKS(0)
       };
 
+      // The CCNC accommodations are not optional once longitudinal is on: 0x105's counter
+      // steps by 2 on these cars, so the standard +1 check can never be satisfied and
+      // is_msg_valid() would clear controls_allowed continuously. Keep these in step with the
+      // non-longitudinal branch below.
+      static RxCheck hyundai_canfd_alt_buttons_ccnc_long_rx_checks[] = {
+        HYUNDAI_CANFD_ALT_BUTTONS_RX_CHECKS_CCNC(0)
+      };
+
+      static RxCheck hyundai_canfd_alt_buttons_ccnc_btn_cluster_long_rx_checks[] = {
+        HYUNDAI_CANFD_ALT_BUTTONS_RX_CHECKS_CCNC_BTN_CLUSTER(0)
+      };
+
       static CanMsg hyundai_canfd_lfa_steering_camera_scc_tx_msgs[] = {
         HYUNDAI_CANFD_LFA_STEERING_CAMERA_SCC_TX_MSGS(true)
       };
@@ -493,7 +505,13 @@ static safety_config hyundai_canfd_init(uint16_t param) {
       };
 
       if (hyundai_canfd_alt_buttons) {
-        SET_RX_CHECKS(hyundai_canfd_alt_buttons_long_rx_checks, ret);
+        if (get_hyundai_ccnc() && hyundai_btn_cluster_0x10b) {
+          SET_RX_CHECKS(hyundai_canfd_alt_buttons_ccnc_btn_cluster_long_rx_checks, ret);
+        } else if (get_hyundai_ccnc()) {
+          SET_RX_CHECKS(hyundai_canfd_alt_buttons_ccnc_long_rx_checks, ret);
+        } else {
+          SET_RX_CHECKS(hyundai_canfd_alt_buttons_long_rx_checks, ret);
+        }
       } else {
         SET_RX_CHECKS(hyundai_canfd_long_rx_checks, ret);
       }
