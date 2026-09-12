@@ -10,7 +10,7 @@ from opendbc.car.hyundai.radar_interface import RadarInterface
 
 from opendbc.sunnypilot.car.hyundai.escc import ESCC_MSG
 from opendbc.sunnypilot.car.hyundai.longitudinal.helpers import get_longitudinal_tune
-from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP, HyundaiSafetyFlagsSP
+from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP, HyundaiSafetyFlagsSP, ANGLE_STEERING_MODEL_BY_CAR, encode_angle_model_id
 
 ButtonType = structs.CarState.ButtonEvent.Type
 Ecu = structs.CarParams.Ecu
@@ -254,6 +254,11 @@ class CarInterface(CarInterfaceBase):
     # opendbc/safety/modes/hyundai_canfd.h, or the panda will reject every button we send.
     alt_buttons_supported = bool(stock_cp.flags & HyundaiFlags.CCNC and stock_cp.flags & HyundaiFlags.CANFD_CAMERA_SCC)
     ret.intelligentCruiseButtonManagementAvailable = not (stock_cp.flags & HyundaiFlags.CANFD_ALT_BUTTONS) or alt_buttons_supported
+
+    # Encode angle steering vehicle model ID so the panda can use per-vehicle physics
+    if stock_cp.flags & HyundaiFlags.CANFD_ANGLE_STEERING:
+      angle_model_id = ANGLE_STEERING_MODEL_BY_CAR.get(candidate, 0)
+      ret.safetyParam |= encode_angle_model_id(angle_model_id)
 
     return ret
 

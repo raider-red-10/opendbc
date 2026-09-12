@@ -16,6 +16,7 @@ from opendbc.car.values import Platform
 from opendbc.car.volkswagen.values import CAR as VOLKSWAGEN
 from opendbc.car.body.values import CAR as COMMA
 from opendbc.car.psa.values import CAR as PSA
+from opendbc.car.mg.values import CAR as MG
 
 # FIXME: add routes for these cars
 non_tested_cars = [
@@ -38,7 +39,6 @@ non_tested_cars = [
   TOYOTA.TOYOTA_RAV4H,
 
   # port extensions
-  HYUNDAI.KIA_CEED_PHEV_2022_NON_SCC,
   HYUNDAI.HYUNDAI_KONA_EV_NON_SCC,
   HYUNDAI.HYUNDAI_BAYON_1ST_GEN_NON_SCC,
   HYUNDAI.HYUNDAI_ELANTRA_2022_NON_SCC,
@@ -63,6 +63,7 @@ non_tested_cars = [
 non_tested_cars += [
   HYUNDAI.GENESIS_GV80_2025,
   HYUNDAI.HYUNDAI_IONIQ_5_PE,
+  HYUNDAI.HYUNDAI_IONIQ_9,
   HYUNDAI.KIA_EV6_2025,
   HYUNDAI.KIA_EV9,
   HYUNDAI.GENESIS_GV70_ELECTRIFIED_2ND_GEN,
@@ -210,7 +211,7 @@ routes = [
   CarTestRoute("05a8f0197fdac372/2022-10-19--14-14-09", HYUNDAI.HYUNDAI_IONIQ_5),  # LKA steering
   #CarTestRoute("e1107f9d04dfb1e2/00000455--9b2328ec73", HYUNDAI.HYUNDAI_IONIQ_5_PE),  # LKA steering HDA2 LFA2
   CarTestRoute("eb4eae1476647463/2023-08-26--18-07-04", HYUNDAI.HYUNDAI_IONIQ_6, segment=6),  # LKA steering
-  CarTestRoute("71e4e67d29034771/0000001b--b7b4774ec4", HYUNDAI.HYUNDAI_IONIQ_9),  # LKA steering
+  # CarTestRoute("71e4e67d29034771/0000001b--b7b4774ec4", HYUNDAI.HYUNDAI_IONIQ_9),  # LKA steering # Angle steering
   CarTestRoute("3f29334d6134fcd4/2022-03-30--22-00-50", HYUNDAI.HYUNDAI_IONIQ_PHEV_2019),
   CarTestRoute("fa8db5869167f821/2021-06-10--22-50-10", HYUNDAI.HYUNDAI_IONIQ_PHEV),
   CarTestRoute("e1107f9d04dfb1e2/2023-09-05--22-32-12", HYUNDAI.HYUNDAI_IONIQ_PHEV),  # openpilot longitudinal enabled
@@ -407,7 +408,12 @@ routes = [
   CarTestRoute("2c912ca5de3b1ee9/0000025d--6eb6bcbca4", TESLA.TESLA_MODEL_Y, segment=4),
   CarTestRoute("bdda168c0c35fad7/00000001--5c5a36ec06", TESLA.TESLA_MODEL_X), # openpilot longitudinal
 
+  CarTestRoute("5d61e2f6e1f247f3/00000054--d3dfb01b34", MG.MG_5_EV),
+
   # Segments that test specific issues
   # Controls mismatch due to standstill threshold
   CarTestRoute("bec2dcfde6a64235/2022-04-08--14-21-32", HONDA.HONDA_CRV_HYBRID, segment=22),
+
+  # port extensions
+  CarTestRoute("dc7bf18c8af12e37/00000006--ea06255cd0", HYUNDAI.KIA_CEED_PHEV_2022_NON_SCC),
 ]

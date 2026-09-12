@@ -5,7 +5,8 @@ from opendbc.car.hyundai.fingerprints import FW_VERSIONS
 from opendbc.car.hyundai.interface import CarInterface
 from opendbc.car.hyundai.values import CAR
 from opendbc.car.structs import CarParams
-from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP, HyundaiSafetyFlagsSP
+from opendbc.sunnypilot.car.hyundai.values import (HyundaiFlagsSP, HyundaiSafetyFlagsSP, HyundaiAngleSteeringModel,
+                                                   ANGLE_STEERING_MODEL_BY_CAR, ANGLE_MODEL_MASK, ANGLE_MODEL_SHIFT)
 
 ECAN = 0
 BLINKERS, BLINKERS_ALT = 0x413, 0x3E3
@@ -37,6 +38,19 @@ class TestHda1TraitFlags(unittest.TestCase):
     _, CP_SP = resolve(CAR.HYUNDAI_PALISADE_HEV_LX3, lx3_fp())
     self.assertTrue(CP_SP.flags & HyundaiFlagsSP.BTN_CLUSTER_0X10B)
     self.assertTrue(CP_SP.safetyParam & HyundaiSafetyFlagsSP.BTN_CLUSTER_0X10B)
+
+  def test_button_bit_coexists_with_the_angle_model_id(self):
+    # safetyParamSP bits 4-7 carry the panda's per-vehicle angle model; the button trait must
+    # live outside that field or the LX3 would be decoded as some other car's physics
+    model_field = ANGLE_MODEL_MASK << ANGLE_MODEL_SHIFT
+    for name, value in vars(HyundaiSafetyFlagsSP).items():
+      if name.isupper():
+        self.assertFalse(value & model_field, f"{name} overlaps the angle model ID field")
+
+    _, CP_SP = resolve(CAR.HYUNDAI_PALISADE_HEV_LX3, lx3_fp())
+    self.assertTrue(CP_SP.safetyParam & HyundaiSafetyFlagsSP.BTN_CLUSTER_0X10B)
+    self.assertEqual((CP_SP.safetyParam >> ANGLE_MODEL_SHIFT) & ANGLE_MODEL_MASK, HyundaiAngleSteeringModel.HYUNDAI_PALISADE_HEV_LX3)
+    self.assertEqual(ANGLE_STEERING_MODEL_BY_CAR[str(CAR.HYUNDAI_PALISADE_HEV_LX3)], HyundaiAngleSteeringModel.HYUNDAI_PALISADE_HEV_LX3)
 
   def test_sorento_declares_nothing(self):
     fp = gen_empty_fingerprint()

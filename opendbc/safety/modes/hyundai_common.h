@@ -22,7 +22,7 @@ enum {
   HYUNDAI_PARAM_SP_LONGITUDINAL_MAIN_CRUISE_TOGGLEABLE = 2,
   HYUNDAI_PARAM_SP_HAS_LDA_BUTTON = 4,
   HYUNDAI_PARAM_SP_NON_SCC = 8,
-  HYUNDAI_PARAM_SP_BTN_CLUSTER_0X10B = 16,
+  HYUNDAI_PARAM_SP_BTN_CLUSTER_0X10B = 256,  // bits 4-7 carry the angle steering model ID (hyundai_canfd_angle_models.h)
 };
 
 // common state
