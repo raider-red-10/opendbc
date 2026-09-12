@@ -392,7 +392,7 @@ class CAR(Platforms):
       HyundaiCarDocs("Hyundai Palisade Hybrid (without HDA II, LFA2) 2026", "Lane Follow Assist 2",
                      car_parts=CarParts.common([CarHarness.hyundai_n])),
     ],
-    CarSpecs(mass=2175, wheelbase=2.97, steerRatio=13.72),
+    CarSpecs(mass=2110, wheelbase=2.97, steerRatio=14.3),  # Limited Hybrid FWD, 4,652 lb; 14.3:1 per the Hyundai spec sheet
     flags=HyundaiFlags.CANFD_ANGLE_STEERING | HyundaiFlags.CCNC,
   )
   HYUNDAI_SONATA = HyundaiPlatformConfig(
