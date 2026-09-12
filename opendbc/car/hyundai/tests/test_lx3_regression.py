@@ -38,12 +38,11 @@ class TestSorentoRegression(unittest.TestCase):
         CP = self._resolve(probe)
 
         assert str(CP.carFingerprint) == self.expected_all["carFingerprint"]
-        assert int(CP.flags) == expected["flags"], (
-          f"[{probe}] Sorento flags changed: {expected['flags']} -> {int(CP.flags)} "
-          f"(baseline decoded as {expected['flagNames']})")
-        assert int(CP.safetyConfigs[-1].safetyParam) == expected["safetyParam"], (
-          f"[{probe}] Sorento safetyParam changed: {expected['safetyParam']} -> "
-          f"{int(CP.safetyConfigs[-1].safetyParam)} (baseline decoded as {expected['safetyFlagNames']})")
+        assert int(CP.flags) == expected["flags"], \
+          f"[{probe}] Sorento flags changed: {expected['flags']} -> {int(CP.flags)} (baseline decoded as {expected['flagNames']})"
+        safety_param = int(CP.safetyConfigs[-1].safetyParam)
+        assert safety_param == expected["safetyParam"], \
+          f"[{probe}] Sorento safetyParam changed: {expected['safetyParam']} -> {safety_param} (baseline decoded as {expected['safetyFlagNames']})"
         assert bool(CP.alphaLongitudinalAvailable) == expected["alphaLongitudinalAvailable"]
 
   def test_no_ccnc_contamination(self):
